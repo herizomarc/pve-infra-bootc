@@ -1,6 +1,6 @@
 ---
 # =========================================================================
-# 👑 SOUVEREIGN OPENBAO-DRIVEN ZERO-SECRET COMPILATION PIPELINE
+# 👑 ENTERPRISE STANDARD: SOUVEREIGN OPENBAO INTEGRATED FACTORY (SECRETLESS)
 # =========================================================================
 
 stages:
@@ -8,42 +8,47 @@ stages:
   - compile-disk
 
 variables:
+  # ➔ NATIVE GITLAB REGISTRY: Targets internal storage namespaces automatically
   IMAGE_NAME: "$CI_REGISTRY_IMAGE"
   IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
-  BAO_ADDR: "https://10.10.99.20:8200"
-  BAO_SKIP_VERIFY: "true"
+  # Configuration globale de votre infrastructure souveraine OpenBao (VM 10.10.99.20)
+  VAULT_ADDR: "https://10.10.99.20:8200"
+  VAULT_SKIP_VERIFY: "true"
 
 # ➔ STAGE 1: PARALLEL OCI CONTENERIZATION (PHASE 1)
 build_bootc_container:
   stage: build-container
   image: mgmt-podman-runner:latest
   tags:
-    - image-builder # Aiguillage sur votre Runner local
+    - image-builder # Aiguillage sur votre Runner local RHEL 9 (Mode non-privilégié)
   parallel:
     matrix:
       - APPLIANCE: [zabbix]
+      
+  # 🔐 POIGNÉE DE MAIN INTERNE : L'agent GitLab génère le passeport OIDC cryptographique éphémère
+  id_tokens:
+    BAO_ID_TOKEN:
+      aud: "https://10.10.99.20:8200"
+      
+  # 🔐 INTEGRATION NATIVE OPENBAO : Injection en RAM via les chemins descriptifs sémantiques
+  secrets:
+    RH_USER:
+      vault: secret/data/infrastructure/rhel-registry-entitlement/service_account_username@secret
+      token: $BAO_ID_TOKEN
+    RH_TOKEN:
+      vault: secret/data/infrastructure/rhel-registry-entitlement/service_account_token@secret
+      token: $BAO_ID_TOKEN
+
   script:
-    # 🔐 POIGNÉE DE MAIN NATIVE VIA PODMAN CONTAINER CLIENT (Pour contourner le shell local)
-    - >
-      export BAO_TOKEN=$(podman run --rm -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY registry.entreprise.local/bao-client:latest sh -c "
-      bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$CI_JOB_JWT | grep client_token | awk '{print \$2}' | tr -d '\",'"
-      )
-    
-    # 🔐 EXTRACTION DES ACCÈS RED HAT EN RAM VIA LE CONTENEUR SOUVERAIN
-    - >
-      export RH_USER=$(podman run --rm -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN registry.entreprise.local/bao-client:latest bao kv get -field=service_account_username secret/infrastructure/rhel-registry-entitlement)
-    - >
-      export RH_TOKEN=$(podman run --rm -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN registry.entreprise.local/bao-client:latest bao kv get -field=service_account_token secret/infrastructure/rhel-registry-entitlement)
-    
-    # Authentification auprès des registres
+    # Authentification transparente auprès des registres via les variables injectées en RAM
     - podman login registry.redhat.io -u "$RH_USER" -p "$RH_TOKEN"
     - podman login $CI_REGISTRY -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
     
-    # Compilation OCI
+    # Compilation et propulsion de l'OS immuable incluant la stack Zabbix 7.0 LTS
     - podman build -t $IMAGE_NAME/$APPLIANCE:$IMAGE_TAG -f containers/$APPLIANCE.Containerfile .
     - podman push $IMAGE_NAME/$APPLIANCE:$IMAGE_TAG
 
-# ➔ STAGE 2: PARALLEL HARDWARE TRANSLATION (PHASE 2)
+# ➔ STAGE 2: PARALLEL HARDWARE TRANSLATION (PHASE 2 - PRIVILEGED RUNNER NODE)
 compile_proxmox_qcow2:
   stage: compile-disk
   image: quay.io/centos-bootc/bootc-image-builder:latest
@@ -51,25 +56,31 @@ compile_proxmox_qcow2:
     matrix:
       - APPLIANCE: [zabbix]
   tags:
-    - privileged
+    - privileged # ⚠️ MANDATORY: Requis exclusivement pour le partitionnement matériel loop-device
+    
+  # 🔐 RE-AUTHENTICATE : Renouvellement du passeport cryptographique pour l'étape de compilation disque
+  id_tokens:
+    BAO_ID_TOKEN:
+      aud: "https://10.10.99.20:8200"
+      
+  # 🔐 EXTRACTION DES PARAMÈTRES DE SÉCURITÉ DE L'OS DE SECOURS
+  secrets:
+    SEC_SSH_KEY:
+      vault: secret/data/infrastructure/secops-host-authentication/ed25519_public_key@secret
+      token: $BAO_ID_TOKEN
+    SEC_PASS_HASH:
+      vault: secret/data/infrastructure/secops-console-credential/yescrypt_password_hash@secret
+      token: $BAO_ID_TOKEN
+      
   script:
     - podman login $CI_REGISTRY -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
     
-    # Ré-authentification via le conteneur client pour l'étape de build matériel
-    - >
-      export BAO_TOKEN=$(podman run --rm -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY registry.entreprise.local/bao-client:latest sh -c "
-      bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$CI_JOB_JWT | grep client_token | awk '{print \$2}' | tr -d '\",'"
-      )
-    
-    - >
-      export SEC_SSH_KEY=$(podman run --rm -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN registry.entreprise.local/bao-client:latest bao kv get -field=ed25519_public_key secret/infrastructure/secops-host-authentication)
-    - >
-      export SEC_PASS_HASH=$(podman run --rm -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN registry.entreprise.local/bao-client:latest bao kv get -field=yescrypt_password_hash secret/infrastructure/secops-console-credential)
-    
+    # Substitution en mémoire vive (RAM) au sein du gabarit de configuration
     - sed -i "s|{{SSH_KEY_INJECTION}}|$SEC_SSH_KEY|" config.toml
     - sed -i "s|{{PASSWORD_HASH_INJECTION}}|$SEC_PASS_HASH|" config.toml
     
     - mkdir -p build-output
+    # Exécution native de la traduction disque avec isolation stricte des contextes SELinux (:z)
     - >
       podman run --rm --privileged
       -v ./config.toml:/config.toml:ro,z
@@ -78,6 +89,7 @@ compile_proxmox_qcow2:
       quay.io/centos-bootc/bootc-image-builder:latest
       --type qcow2 --config /config.toml --output /output $IMAGE_NAME/$APPLIANCE:$IMAGE_TAG
     
+    # Transfert atomique du livrable de 1,5 Go vers le datastore ISO local de votre Proxmox
     - cp ./build-output/qcow2/disk.qcow2 /var/lib/vz/template/iso/rhel9-$APPLIANCE-bootc.qcow2.img
   artifacts:
     expire_in: 2 days
