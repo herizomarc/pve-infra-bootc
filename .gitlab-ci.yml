@@ -1,0 +1,91 @@
+---
+# =========================================================================
+# 👑 SOUVEREIGN OPENBAO-DRIVEN ZERO-SECRET COMPILATION PIPELINE
+# =========================================================================
+
+stages:
+  - build-container
+  - compile-disk
+
+variables:
+  # ➔ NATIVE GITLAB REGISTRY: Targets internal storage namespaces automatically
+  IMAGE_NAME: "$CI_REGISTRY_IMAGE"
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+  # Configuration réseau locale et souveraine de votre cluster OpenBao
+  BAO_ADDR: "https://10.10.99.20:8200"
+  BAO_SKIP_VERIFY: "true"
+
+# ➔ STAGE 1: PARALLEL OCI CONTENERIZATION (PHASE 1)
+build_bootc_container:
+  stage: build-container
+  image: mgmt-podman-runner:latest
+  parallel:
+    matrix:
+      - APPLIANCE: [zabbix]
+  script:
+    # 1. 🔐 HANDSHAKE SOUVERAIN : Échange du jeton temporaire GitLab contre un token d'accès OpenBao
+    - >
+      export BAO_TOKEN=$(bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$CI_JOB_JWT | json_filter .auth.client_token)
+    
+    # 2. 🔐 EXTRACTION EN RAM : Récupération des identifiants Red Hat via le chemin descriptif d'habilitation
+    - >
+      export RH_USER=$(bao kv get -field=service_account_username secret/infrastructure/rhel-registry-entitlement)
+    - >
+      export RH_TOKEN=$(bao kv get -field=service_account_token secret/infrastructure/rhel-registry-entitlement)
+    
+    # 3. 🔐 RED HAT HANDSHAKE : Connexion authentifiée au catalogue officiel pour tirer l'OS de base
+    - podman login registry.redhat.io -u "$RH_USER" -p "$RH_TOKEN"
+    
+    # 4. 🔐 NATIVE GITLAB HANDSHAKE : Connexion automatique à l'espace Container Registry de votre GitLab Cloud
+    - podman login $CI_REGISTRY -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
+    
+    # 5. EXECUTE IMMUTABLE OCI BUILD AND PUSH TO LOCAL REGISTRY
+    - podman build -t $IMAGE_NAME/$APPLIANCE:$IMAGE_TAG -f containers/$APPLIANCE.Containerfile .
+    - podman push $IMAGE_NAME/$APPLIANCE:$IMAGE_TAG
+
+# ➔ STAGE 2: PARALLEL HARDWARE TRANSLATION (PHASE 2 - PRIVILEGED RUNNER NODE)
+compile_proxmox_qcow2:
+  stage: compile-disk
+  image: quay.io/centos-bootc/bootc-image-builder:latest
+  parallel:
+    matrix:
+      - APPLIANCE: [zabbix]
+  tags:
+    - privileged # ⚠️ MANDATORY: Requis exclusivement pour le partitionnement matériel loop-device
+  script:
+    # Authentification pour permettre à l'image-builder de récupérer votre conteneur fraîchement poussé
+    - podman login $CI_REGISTRY -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
+    
+    # 1. 🔐 RE-AUTHENTICATE : Nouvel échange de jeton pour sécuriser l'accès de l'étape de build matériel
+    - >
+      export BAO_TOKEN=$(bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$CI_JOB_JWT | json_filter .auth.client_token)
+    
+    # 2. 🔐 DESCRIPTIVE EXTRACTION : Récupération de la clé SSH-ED25519 et du hash d'accès de secours console
+    - >
+      export SEC_SSH_KEY=$(bao kv get -field=ed25519_public_key secret/infrastructure/secops-host-authentication)
+    - >
+      export SEC_PASS_HASH=$(bao kv get -field=yescrypt_password_hash secret/infrastructure/secops-console-credential)
+    
+    # 3. ➔ SUBSTITUTION EN RAM : Remplacement des variables dans le template config.toml uniquement en mémoire vive
+    - sed -i "s|{{SSH_KEY_INJECTION}}|$SEC_SSH_KEY|" config.toml
+    - sed -i "s|{{PASSWORD_HASH_INJECTION}}|$SEC_PASS_HASH|" config.toml
+    
+    - mkdir -p build-output
+    # 4. TRANSLATION MATÉRIELLE : Traduction disque avec isolation stricte des contextes SELinux (:z)
+    - >
+      podman run --rm --privileged
+      -v ./config.toml:/config.toml:ro,z
+      -v ./build-output:/output:z
+      -v /var/lib/containers/storage:/var/lib/containers/storage:z
+      quay.io/centos-bootc/bootc-image-builder:latest
+      --type qcow2
+      --config /config.toml
+      --output /output
+      $IMAGE_NAME/$APPLIANCE:$IMAGE_TAG
+    
+    # 5. TRANSFERT ATOMIQUE : Copie directe du disque final de 1,5 Go sur le datastore ISO de votre nœud Proxmox
+    - cp ./build-output/qcow2/disk.qcow2 /var/lib/vz/template/iso/rhel9-$APPLIANCE-bootc.qcow2.img
+  artifacts:
+    expire_in: 2 days
+    paths:
+      - build-output/qcow2/*.qcow2

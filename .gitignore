@@ -1,0 +1,7 @@
+.terraform/
+*.ids
+*.manifest
+*.qcow2
+secrets.auto.tfvars
+.terraform.lock.hcl
+build-output/
