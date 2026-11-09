@@ -1,57 +1,45 @@
 ---
 # =========================================================================
-# 👑 STEP 1.5: NETWORK-HARDENED LIVE METADATA EXTRACTION TEST
+# 🔬 STEP 3.1: ISOLATED OPENBAO OIDC JWT HANDSHAKE VALIDATION
 # =========================================================================
 
 stages:
-  - test-authfile
+  - test-handshake
 
-validate_authfile_login:
-  stage: test-authfile
+validate_bao_handshake:
+  stage: test-handshake
   tags:
-    - image-builder # 🔐 Local vm-gitlabrunner-01 executor node
+    - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 executor node
   variables:
-    TMP_AUTH_FILE: "$CI_PROJECT_DIR/containers-auth-temp.json"
+    BAO_ADDR: "https://10.10.99.20:8200"
+    BAO_SKIP_VERIFY: "true"
     
   script:
-    - set -e # 🛡️ FAIL-FAST
-    - echo "🛡️ INITIATING OFFICIAL RED HAT SERVICE ACCOUNT AUTHENTICATION CHECK..."
+    - set -e # 🛡️ FAIL-FAST: Stop immediately upon any error [1.5]
+    - echo "🛡️ INITIATING OFFICIAL SOUVEREIGN OPENBAO OIDC HANDSHAKE TEST..."
+    - echo "Target Authority Endpoint -> $BAO_ADDR"
     
-    # 1. ATOMIC GENERATION
+    # 1. ATOMIC IF BLOCK: Execute the handshake and verify token generation instantly
+    - echo "Sending ephemeral GitLab JWT to OpenBao login gate..."
     - >
-      if ! podman login registry.redhat.io -u "$REDHAT_USER" -p "$REDHAT_TOKEN" --authfile "$TMP_AUTH_FILE" > /dev/null 2>&1; then
-        echo "🔴 CRITICAL ERROR: Failed to generate auth.json file."
+      if ! export INITIAL_BAO_TOKEN=$(podman run --rm --network=host alpine:latest sh -c "
+        apk add --no-cache curl jq > /dev/null && \
+        curl -s -k --request POST --data '{\"role\": \"gitlab-infra-role\", \"jwt\": \"$CI_JOB_JWT\"}' $BAO_ADDR/v1/auth/jwt/login | jq -r '.auth.client_token'
+      "); then
+        echo "🔴 HANDSHAKE CRITICAL ERROR: Network connection to OpenBao failed or refused."
         exit 1
       fi
 
-    # 2. ISOLATED NETWORK PULL: Forcer le téléchargement explicite avec affichage de la progression
-    - echo "====================================================================="
-    - echo "📥 PULLING BASE IMAGE LAYERS FROM REGISTRY.REDHAT.IO..."
-    - echo "====================================================================="
-    - podman pull --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest
-
-    # 3. ATOMIC METADATA INSPECTION (Using network host mapping to leverage AdGuard resolution)
-    - echo "====================================================================="
-    - echo "🔍 INSPECTING LOCAL METADATA EXTRACTIONS..."
-    - echo "====================================================================="
+    # 2. ATOMIC CONDITIONAL CHECK: Validate the format of the intercepted token
+    # (A valid OpenBao client token always begins with the 'btoken.' prefix)
     - >
-      if podman run --rm --network=host --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest cat /etc/redhat-release > /dev/null 2>&1; then
-        echo "🟢 SECURITY VALIDATION PASSED: Secure handshake and download established."
-        echo "---------------------------------------------------------------------"
-        echo "📊 TARGET IMAGE IDENTIFIED:"
-        # Exécution en réseau local partagé
-        podman run --rm --network=host --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest cat /etc/redhat-release
-        podman run --rm --network=host --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest uname -m
+      if echo "$INITIAL_BAO_TOKEN" | grep -q "^btoken\."; then
+        echo "🟢 HANDSHAKE VALIDATION PASSED: Secure dynamic token successfully intercepted in RAM!"
         echo "====================================================================="
-        echo "👑 MILESTONE 1 GRANTED: Handshake and live image extraction verified!"
+        echo "👑 HANDSHAKE GRANTED: OpenBao strictly trusts GitLab Cloud identity!"
         echo "====================================================================="
       else
-        echo "🔴 SECURITY VALIDATION FAILED: Unable to execute commands inside target image."
+        echo "🔴 HANDSHAKE VALIDATION FAILED: Received an invalid or null token string."
+        echo "Diagnostic Data -> OpenBao rejected the token. Check gitlab-infra-role configuration or logs."
         exit 1
       fi
-
-  # 🧹 SECOPS SAFETY VALVE: Guaranteed cleanup execution on the host filesystem
-  after_script:
-    - echo "Executing mandatory post-job security cleanup task..."
-    - rm -f "$CI_PROJECT_DIR/containers-auth-temp.json"
-    - echo "Cleanup process completed. Active footprints purged from RAM. 🟢"
