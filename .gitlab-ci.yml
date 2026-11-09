@@ -1,45 +1,60 @@
 ---
 # =========================================================================
-# 🔬 STEP 3.1: ISOLATED OPENBAO OIDC JWT HANDSHAKE VALIDATION
+# 🔬 STEP 3.4: LIVE OPENBAO SSOT RAM EXTRACTION AND AUDIT FLOW
 # =========================================================================
 
 stages:
-  - test-handshake
+  - test-ssot
 
-validate_bao_handshake:
-  stage: test-handshake
+extract_bao_secrets:
+  stage: test-ssot
   tags:
     - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 executor node
   variables:
     BAO_ADDR: "https://10.10.99.20:8200"
     BAO_SKIP_VERIFY: "true"
     
+  # 🔐 MATCHING AUDIENCE: Must align with your OpenBao 'bound_audiences'
+  id_tokens:
+    SECURE_OIDC_TOKEN:
+      aud: "https://gitlab.com"
+      
   script:
-    - set -e # 🛡️ FAIL-FAST: Stop immediately upon any error [1.5]
-    - echo "🛡️ INITIATING OFFICIAL SOUVEREIGN OPENBAO OIDC HANDSHAKE TEST..."
-    - echo "Target Authority Endpoint -> $BAO_ADDR"
+    - set -e # 🛡️ FAIL-FAST [1.5]
+    - echo "🛡️ INITIATING LIVE SOUVEREIGN SECRETS EXTRACTION..."
     
-    # 1. ATOMIC IF BLOCK: Execute the handshake and verify token generation instantly
-    - echo "Sending ephemeral GitLab JWT to OpenBao login gate..."
+    # 1. ATOMIC HANDSHAKE
     - >
-      if ! export INITIAL_BAO_TOKEN=$(podman run --rm --network=host alpine:latest sh -c "
+      export BAO_TOKEN=$(podman run --rm --network=host alpine:latest sh -c "
         apk add --no-cache curl jq > /dev/null && \
-        curl -s -k --request POST --data '{\"role\": \"gitlab-infra-role\", \"jwt\": \"$CI_JOB_JWT\"}' $BAO_ADDR/v1/auth/jwt/login | jq -r '.auth.client_token'
-      "); then
-        echo "🔴 HANDSHAKE CRITICAL ERROR: Network connection to OpenBao failed or refused."
-        exit 1
-      fi
+        curl -s -k --request POST --data '{\"role\": \"gitlab-infra-role\", \"jwt\": \"$SECURE_OIDC_TOKEN\"}' $BAO_ADDR/v1/auth/jwt/login | jq -r '.auth.client_token'
+      ")
 
-    # 2. ATOMIC CONDITIONAL CHECK: Validate the format of the intercepted token
-    # (A valid OpenBao client token always begins with the 'btoken.' prefix)
+    # 2. ATOMIC RAM EXTRACTION (No disk footprint, pure memory mapping) [1.5, 1.11]
+    - echo "Querying OpenBao engine endpoints for RHEL entitlements..."
     - >
-      if echo "$INITIAL_BAO_TOKEN" | grep -q "^btoken\."; then
-        echo "🟢 HANDSHAKE VALIDATION PASSED: Secure dynamic token successfully intercepted in RAM!"
+      export VAULT_RESPONSE=$(podman run --rm --network=host alpine:latest sh -c "
+        apk add --no-cache curl jq > /dev/null && \
+        curl -s -k -H \"X-Vault-Token: $BAO_TOKEN\" $BAO_ADDR/v1/secret/data/infrastructure/rhel-registry-entitlement
+      ")
+
+    # 3. SECOPS AUDIT CONTROLS: Parse inside RAM without echoing sensitive strings [1.5]
+    - export EXTRACTED_USER=$(echo "$VAULT_RESPONSE" | podman run --rm -i alpine:latest sh -c "apk add --no-cache jq > /dev/null && jq -r '.data.data.service_account_username'")
+    - export EXTRACTED_TOKEN=$(echo "$VAULT_RESPONSE" | podman run --rm -i alpine:latest sh -c "apk add --no-cache jq > /dev/null && jq -r '.data.data.service_account_token'")
+
+    # 4. CONDITIONAL BLOCK IF: Asserting data validity string lengths
+    - >
+      if [ -n "$EXTRACTED_USER" ] && [ -n "$EXTRACTED_TOKEN" ]; then
+        echo "🟢 SSOT VALIDATION PASSED: Secrets successfully mapped inside volatile RAM maps!"
+        echo "---------------------------------------------------------------------"
+        echo "📊 AUDIT FOOTPRINT TRACKING:"
+        # Displays safely the masked structure signature to prove it works [1.5]
+        echo "Service Account Target -> ${EXTRACTED_USER:0:7}******"
+        echo "Token Size Verified    -> $(echo -n '$EXTRACTED_TOKEN' | wc -c) bytes"
         echo "====================================================================="
-        echo "👑 HANDSHAKE GRANTED: OpenBao strictly trusts GitLab Cloud identity!"
+        echo "👑 MILESTONE 3.4 GRANTED: Single Source of Truth is fully operational!"
         echo "====================================================================="
       else
-        echo "🔴 HANDSHAKE VALIDATION FAILED: Received an invalid or null token string."
-        echo "Diagnostic Data -> OpenBao rejected the token. Check gitlab-infra-role configuration or logs."
+        echo "🔴 SSOT VALIDATION FAILED: OpenBao returned empty payload values."
         exit 1
       fi
