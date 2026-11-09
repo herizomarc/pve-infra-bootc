@@ -1,6 +1,6 @@
 ---
 # =========================================================================
-# 👑 STEP 3.5: NATIVE OPENBAO CLI RAM EXTRACTION (THE PROFESSIONAL WAY)
+# 👑 STEP 3.5: FINALISED SECURE NATIVE EXTRACTION WITH ZERO PREFLIGHT CHECKS
 # =========================================================================
 
 stages:
@@ -14,7 +14,6 @@ extract_bao_secrets:
     BAO_ADDR: "https://10.10.99.20:8200"
     BAO_SKIP_VERIFY: "true"
     TMP_AUTH_FILE: "$CI_PROJECT_DIR/containers-auth-temp.json"
-    # ➔ Utilisation de l'image de conteneur officielle du projet OpenBao
     BAO_CLIENT: "quay.io/openbao/openbao:latest"
     
   id_tokens:
@@ -25,20 +24,20 @@ extract_bao_secrets:
     - set -e # 🛡️ FAIL-FAST [1.5]
     - echo "🛡️ INITIATING LIVE SOUVEREIGN SECRETS EXTRACTION VIA NATIVE CLI..."
     
-    # 1. NATIVE HANDSHAKE: Échange du jeton via le binaire officiel en 1 seule ligne propre [1.11]
+    # 1. NATIVE HANDSHAKE
     - >
       export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "
         bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep client_token | awk '{print \$2}' | tr -d '\",'
       ")
 
-    # 2. NATIVE FIELD EXTRACTIONS: Plus besoin de cURL ni de jQ ! Extraction directe par champ en RAM [1.11]
+    # 2. NATIVE FIELD EXTRACTIONS (Enforcing -version=2 boundaries to bypass 403 sys checks) [1.11]
     - echo "Streaming RHEL entitlements straight from OpenBao fields into RAM..."
     - >
       export EXTRACTED_USER=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT \
-        bao kv get -field=service_account_username secret/infrastructure/rhel-registry-entitlement)
+        bao kv get -version=2 -field=service_account_username secret/infrastructure/rhel-registry-entitlement)
     - >
       export EXTRACTED_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT \
-        bao kv get -field=service_account_token secret/infrastructure/rhel-registry-entitlement)
+        bao kv get -version=2 -field=service_account_token secret/infrastructure/rhel-registry-entitlement)
 
     # 3. CONDITIONAL SAFETY EXITS [1.5]
     - >
@@ -62,7 +61,7 @@ extract_bao_secrets:
       
     - echo "👑 MILESTONE 3.5 GRANTED Single Source of Truth architecture is live and fully verified!"
 
-  # 🧹 SECOPS SAFETY VALVE: Garantie absolue de destruction [1.5]
+  # 🧹 SECOPS SAFETY VALVE: Guaranteed cleanup execution on the host [1.5]
   after_script:
     - echo "Executing mandatory post-job security cleanup task..."
     - rm -f "$CI_PROJECT_DIR/containers-auth-temp.json"
