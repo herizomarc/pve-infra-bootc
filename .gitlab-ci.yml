@@ -1,6 +1,6 @@
 ---
 # =========================================================================
-# 👑 STEP 3.5: FINALISED SECURE NATIVE EXTRACTION (JSON MAP PARSING)
+# 👑 STEP 3.5: SIMPLIFIED NATIVE GITOPS PIPELINE (KV-V2 CONSERVÉ & KISS)
 # =========================================================================
 
 stages:
@@ -9,60 +9,51 @@ stages:
 extract_bao_secrets:
   stage: test-ssot
   tags:
-    - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 node
+    - image-builder # 🔐 Routage validé sur votre Runner local vm-gitlabrunner-01
   variables:
     BAO_ADDR: "https://10.10.99.20:8200"
     BAO_SKIP_VERIFY: "true"
     TMP_AUTH_FILE: "$CI_PROJECT_DIR/containers-auth-temp.json"
     BAO_CLIENT: "quay.io/openbao/openbao:latest"
     
-  # 🔐 MATCHING AUDIENCE
+  # 🔐 Alignement de l'audience avec la configuration de votre serveur
   id_tokens:
     SECURE_OIDC_TOKEN:
       aud: "https://gitlab.com"
       
   script:
     - set -e # 🛡️ FAIL-FAST [1.5]
-    - echo "🛡️ INITIATING LIVE SOUVEREIGN SECRETS EXTRACTION VIA NATIVE CLI..."
+    - echo "🛡️ INITIATING SIMPLIFIED SECRETS EXTRACTION FROM KV-V2..."
     
-    # 1. NATIVE HANDSHAKE
-    - >
-      export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "
-        bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep client_token | awk '{print \$2}' | tr -d '\",'
-      ")
+    # 1. NATIVE HANDSHAKE: Échange du jeton OIDC (En 1 seule ligne propre) [1.11]
+    - export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep -o '\"client_token\": \"[^\"]*' | grep -o '[^\"]*$'")
 
-    # 2. NATIVE RAW READS: Extraction du format JSON brut filtré directement en RAM [1.5, 1.11]
-    - echo "Streaming RHEL entitlements straight from OpenBao data blocks into RAM..."
-    - >
-      export EXTRACTED_USER=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT \
-        bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep "service_account_username" | awk '{print \$2}' | tr -d '\",')
-    - >
-      export EXTRACTED_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT \
-        bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep "service_account_token" | awk '{print \$2}' | tr -d '\",')
+    # 2. STREAMLINED EXTRACTIONS: Récupération directe en RAM sans plomberie lourde [1.5, 1.11]
+    - echo "Streaming variables from OpenBao data blocks straight into RAM..."
+    - export EXTRACTED_USER=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o '\"service_account_username\": \"[^\"]*' | grep -o '[^\"]*$'")
+    - export EXTRACTED_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o '\"service_account_token\": \"[^\"]*' | grep -o '[^\"]*$'")
 
-    # 3. CONDITIONAL SAFETY EXITS [1.5]
+    # 3. CONDITIONAL SAFETY CHECK [1.5]
     - >
       if [ -z "$EXTRACTED_USER" ] || [ "$EXTRACTED_USER" = "null" ]; then
-        echo "🔴 SSOT CRITICAL FAULT: Extracted user via CLI is null or empty. Flow terminated."
+        echo "🔴 SSOT CRITICAL FAULT: Extraction failed or returned empty payload."
         exit 1
       fi
 
-    - echo "🟢 SSOT VALIDATION PASSED Real secrets mapped inside volatile RAM maps!"
-    - echo "---------------------------------------------------------------------"
+    - echo "🟢 SSOT VALIDATION PASSED Secrets mapped inside volatile RAM maps!"
     - echo "Service Account Target -> ${EXTRACTED_USER:0:7}******"
-    - echo "====================================================================="
     
-    # 4. ATOMIC AUTHFILE PASS-THROUGH TESTING [1.5, 2.21]
+    # 4. ATOMIC AUTHFILE TESTING [1.5, 2.21]
     - echo "Testing passport login generation against registry.redhat.io..."
     - >
       if ! podman login registry.redhat.io -u "$EXTRACTED_USER" -p "$EXTRACTED_TOKEN" --authfile "$TMP_AUTH_FILE" > /dev/null 2>&1; then
-        echo "🔴 REGISTRY FAULT: Generated authfile was rejected by Red Hat authentication gates."
+        echo "🔴 REGISTRY FAULT: Credentials rejected by Red Hat."
         exit 1
       fi
       
-    - echo "👑 MILESTONE 3.5 GRANTED ingle Source of Truth architecture is live and fully verified!"
+    - echo "👑 MILESTONE 3.5 GRANTED Single Source of Truth verified on KV-v2!"
 
-  # 🧹 SECOPS SAFETY VALVE: Guaranteed cleanup execution on the host [1.5]
+  # 🧹 SOUPAPE DE SÉCURITÉ : Garantie absolue de destruction [1.5]
   after_script:
     - echo "Executing mandatory post-job security cleanup task..."
     - rm -f "$CI_PROJECT_DIR/containers-auth-temp.json"
