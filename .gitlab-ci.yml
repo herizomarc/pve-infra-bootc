@@ -1,6 +1,6 @@
 ---
 # =========================================================================
-# 👑 STEP 3.5: SIMPLIFIED NATIVE GITOPS PIPELINE (KV-V2 CONSERVÉ & KISS)
+# 👑 STEP 3.5: FIXED SCHEMA INTERPOLATION (KV-V2 CONSERVÉ & KISS)
 # =========================================================================
 
 stages:
@@ -25,13 +25,13 @@ extract_bao_secrets:
     - set -e # 🛡️ FAIL-FAST [1.5]
     - echo "🛡️ INITIATING SIMPLIFIED SECRETS EXTRACTION FROM KV-V2..."
     
-    # 1. NATIVE HANDSHAKE: Échange du jeton OIDC (En 1 seule ligne propre) [1.11]
-    - export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep -o '\"client_token\": \"[^\"]*' | grep -o '[^\"]*$'")
+    # 1. FIXED EXPORT N°1: Entouré de guillemets simples pour valider le schéma YAML GitLab-CI [1.5, 1.11]
+    - 'export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep -o ''\"client_token\": \"[^\"]*'' | grep -o ''[^\"]*$''")'
 
-    # 2. STREAMLINED EXTRACTIONS: Récupération directe en RAM sans plomberie lourde [1.5, 1.11]
+    # 2. FIXED EXPORT N°2 & 3: Plus aucun risque de conflit de type ou d'échappement [1.5, 1.11]
     - echo "Streaming variables from OpenBao data blocks straight into RAM..."
-    - export EXTRACTED_USER=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o '\"service_account_username\": \"[^\"]*' | grep -o '[^\"]*$'")
-    - export EXTRACTED_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o '\"service_account_token\": \"[^\"]*' | grep -o '[^\"]*$'")
+    - 'export EXTRACTED_USER=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o ''\"service_account_username\": \"[^\"]*'' | grep -o ''[^\"]*$''")'
+    - 'export EXTRACTED_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o ''\"service_account_token\": \"[^\"]*'' | grep -o ''[^\"]*$''")'
 
     # 3. CONDITIONAL SAFETY CHECK [1.5]
     - >
