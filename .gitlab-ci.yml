@@ -1,6 +1,6 @@
 ---
 # =========================================================================
-# 👑 STEP 3.5: HARDENED CLEAN NATIVE EXTRACTION WITH ZERO PREFLIGHT CHECKS
+# 👑 STEP 3.5: FINALISED SECURE NATIVE EXTRACTION WITH EXTENDED FIELD MAPS
 # =========================================================================
 
 stages:
@@ -30,15 +30,14 @@ extract_bao_secrets:
         bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep client_token | awk '{print \$2}' | tr -d '\",'
       ")
 
-    # 2. NATIVE RAW READS: Utilisation de 'bao read' pour contourner le Preflight Check 403 [1.11]
-    # Note: On cible directement le chemin d'API KV-v2 'secret/data/...' avec l'argument '-field' [1.11]
+    # 2. NATIVE RAW READS: Ciblage du champ encapsulé dans l'objet .data du bloc KV-v2 [1.11]
     - echo "Streaming RHEL entitlements straight from OpenBao data blocks into RAM..."
     - >
       export EXTRACTED_USER=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT \
-        bao read -field=service_account_username secret/data/infrastructure/rhel-registry-entitlement)
+        bao read -field=data.service_account_username secret/data/infrastructure/rhel-registry-entitlement)
     - >
       export EXTRACTED_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT \
-        bao read -field=service_account_token secret/data/infrastructure/rhel-registry-entitlement)
+        bao read -field=data.service_account_token secret/data/infrastructure/rhel-registry-entitlement)
 
     # 3. CONDITIONAL SAFETY EXITS [1.5]
     - >
