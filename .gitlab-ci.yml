@@ -1,6 +1,6 @@
 ---
 # =========================================================================
-# 👑 ENHANCED SECOPS VALIDATION: REVEALING TARGET METADATA IN LOGS
+# 👑 STEP 1.5: NETWORK-HARDENED LIVE METADATA EXTRACTION TEST
 # =========================================================================
 
 stages:
@@ -14,7 +14,7 @@ validate_authfile_login:
     TMP_AUTH_FILE: "$CI_PROJECT_DIR/containers-auth-temp.json"
     
   script:
-    - set -e # 🛡️ FAIL-FAST [1.5]
+    - set -e # 🛡️ FAIL-FAST
     - echo "🛡️ INITIATING OFFICIAL RED HAT SERVICE ACCOUNT AUTHENTICATION CHECK..."
     
     # 1. ATOMIC GENERATION
@@ -24,27 +24,33 @@ validate_authfile_login:
         exit 1
       fi
 
-    # 2. ATOMIC METADATA INSPECTION (Best Practice Validation)
+    # 2. ISOLATED NETWORK PULL: Forcer le téléchargement explicite avec affichage de la progression
     - echo "====================================================================="
-    - echo "🔍 INSPECTING REMOTE IMAGE METADATA FROM REGISTRY.REDHAT.IO..."
+    - echo "📥 PULLING BASE IMAGE LAYERS FROM REGISTRY.REDHAT.IO..."
+    - echo "====================================================================="
+    - podman pull --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest
+
+    # 3. ATOMIC METADATA INSPECTION (Using network host mapping to leverage AdGuard resolution)
+    - echo "====================================================================="
+    - echo "🔍 INSPECTING LOCAL METADATA EXTRACTIONS..."
     - echo "====================================================================="
     - >
-      if podman run --rm --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest rpm -q rhel-release > /dev/null 2>&1; then
-        echo "🟢 SECURITY VALIDATION PASSED: Secure handshake established."
+      if podman run --rm --network=host --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest cat /etc/redhat-release > /dev/null 2>&1; then
+        echo "🟢 SECURITY VALIDATION PASSED: Secure handshake and download established."
         echo "---------------------------------------------------------------------"
         echo "📊 TARGET IMAGE IDENTIFIED:"
-        # ➔ Affiche la version OS interne et l'architecture matérielle pour prouver que le flux fonctionne en direct
-        podman run --rm --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest cat /etc/redhat-release
-        podman run --rm --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest uname -m
+        # Exécution en réseau local partagé
+        podman run --rm --network=host --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest cat /etc/redhat-release
+        podman run --rm --network=host --authfile "$TMP_AUTH_FILE" registry.redhat.io/rhel9/rhel-bootc:latest uname -m
         echo "====================================================================="
         echo "👑 MILESTONE 1 GRANTED: Handshake and live image extraction verified!"
         echo "====================================================================="
       else
-        echo "🔴 SECURITY VALIDATION FAILED: Unable to fetch or inspect target image."
+        echo "🔴 SECURITY VALIDATION FAILED: Unable to execute commands inside target image."
         exit 1
       fi
 
-  # 🧹 SECOPS SAFETY VALVE: Guaranteed cleanup execution on the host filesystem [1.5]
+  # 🧹 SECOPS SAFETY VALVE: Guaranteed cleanup execution on the host filesystem
   after_script:
     - echo "Executing mandatory post-job security cleanup task..."
     - rm -f "$CI_PROJECT_DIR/containers-auth-temp.json"
