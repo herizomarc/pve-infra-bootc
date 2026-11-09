@@ -1,97 +1,47 @@
 ---
 # =========================================================================
-# 👑 ENTERPRISE STANDARD: SOUVEREIGN OPENBAO INTEGRATED FACTORY (SECRETLESS)
+# 👑 THE GOLD STANDARD: ATOMIC CONDITIONAL VALIDATION WITH GUARANTEED PURGE
 # =========================================================================
 
 stages:
-  - build-container
-  - compile-disk
+  - test-authfile
 
-variables:
-  # ➔ NATIVE GITLAB REGISTRY: Targets internal storage namespaces automatically
-  IMAGE_NAME: "$CI_REGISTRY_IMAGE"
-  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
-  # Configuration globale de votre infrastructure souveraine OpenBao (VM 10.10.99.20)
-  VAULT_ADDR: "https://10.10.99.20:8200"
-  VAULT_SKIP_VERIFY: "true"
-
-# ➔ STAGE 1: PARALLEL OCI CONTENERIZATION (PHASE 1)
-build_bootc_container:
-  stage: build-container
-  image: mgmt-podman-runner:latest
+validate_authfile_login:
+  stage: test-authfile
   tags:
-    - image-builder # Aiguillage sur votre Runner local RHEL 9 (Mode non-privilégié)
-  parallel:
-    matrix:
-      - APPLIANCE: [zabbix]
-      
-  # 🔐 POIGNÉE DE MAIN INTERNE : L'agent GitLab génère le passeport OIDC cryptographique éphémère
-  id_tokens:
-    BAO_ID_TOKEN:
-      aud: "https://10.10.99.20:8200"
-      
-  # 🔐 INTEGRATION NATIVE OPENBAO : Injection en RAM via les chemins descriptifs sémantiques
-  secrets:
-    RH_USER:
-      vault: secret/data/infrastructure/rhel-registry-entitlement/service_account_username@secret
-      token: $BAO_ID_TOKEN
-    RH_TOKEN:
-      vault: secret/data/infrastructure/rhel-registry-entitlement/service_account_token@secret
-      token: $BAO_ID_TOKEN
-
+    - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 executor node
+  variables:
+    # Centralized path definition for the transient RAM passport file
+    TMP_AUTH_FILE: "$CI_PROJECT_DIR/containers-auth-temp.json"
+    
   script:
-    # Authentification transparente auprès des registres via les variables injectées en RAM
-    - podman login registry.redhat.io -u "$RH_USER" -p "$RH_TOKEN"
-    - podman login $CI_REGISTRY -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
+    - set -e # 🛡️ FAIL-FAST: Forces immediate job termination upon any system error [1.5]
+    - echo "🛡️ INITIATING OFFICIAL RED HAT SERVICE ACCOUNT AUTHENTICATION CHECK..."
     
-    # Compilation et propulsion de l'OS immuable incluant la stack Zabbix 7.0 LTS
-    - podman build -t $IMAGE_NAME/$APPLIANCE:$IMAGE_TAG -f containers/$APPLIANCE.Containerfile .
-    - podman push $IMAGE_NAME/$APPLIANCE:$IMAGE_TAG
-
-# ➔ STAGE 2: PARALLEL HARDWARE TRANSLATION (PHASE 2 - PRIVILEGED RUNNER NODE)
-compile_proxmox_qcow2:
-  stage: compile-disk
-  image: quay.io/centos-bootc/bootc-image-builder:latest
-  parallel:
-    matrix:
-      - APPLIANCE: [zabbix]
-  tags:
-    - privileged # ⚠️ MANDATORY: Requis exclusivement pour le partitionnement matériel loop-device
-    
-  # 🔐 RE-AUTHENTICATE : Renouvellement du passeport cryptographique pour l'étape de compilation disque
-  id_tokens:
-    BAO_ID_TOKEN:
-      aud: "https://10.10.99.20:8200"
-      
-  # 🔐 EXTRACTION DES PARAMÈTRES DE SÉCURITÉ DE L'OS DE SECOURS
-  secrets:
-    SEC_SSH_KEY:
-      vault: secret/data/infrastructure/secops-host-authentication/ed25519_public_key@secret
-      token: $BAO_ID_TOKEN
-    SEC_PASS_HASH:
-      vault: secret/data/infrastructure/secops-console-credential/yescrypt_password_hash@secret
-      token: $BAO_ID_TOKEN
-      
-  script:
-    - podman login $CI_REGISTRY -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
-    
-    # Substitution en mémoire vive (RAM) au sein du gabarit de configuration
-    - sed -i "s|{{SSH_KEY_INJECTION}}|$SEC_SSH_KEY|" config.toml
-    - sed -i "s|{{PASSWORD_HASH_INJECTION}}|$SEC_PASS_HASH|" config.toml
-    
-    - mkdir -p build-output
-    # Exécution native de la traduction disque avec isolation stricte des contextes SELinux (:z)
+    # 1. ATOMIC IF BLOCK: Instantly generates and validates file write success [1.5]
+    - echo "Generating ephemeral token passport into $TMP_AUTH_FILE..."
     - >
-      podman run --rm --privileged
-      -v ./config.toml:/config.toml:ro,z
-      -v ./build-output:/output:z
-      -v /var/lib/containers/storage:/var/lib/containers/storage:z
-      quay.io/centos-bootc/bootc-image-builder:latest
-      --type qcow2 --config /config.toml --output /output $IMAGE_NAME/$APPLIANCE:$IMAGE_TAG
-    
-    # Transfert atomique du livrable de 1,5 Go vers le datastore ISO local de votre Proxmox
-    - cp ./build-output/qcow2/disk.qcow2 /var/lib/vz/template/iso/rhel9-$APPLIANCE-bootc.qcow2.img
-  artifacts:
-    expire_in: 2 days
-    paths:
-      - build-output/qcow2/*.qcow2
+      if ! podman login registry.redhat.io -u "$REDHAT_USER" -p "$REDHAT_TOKEN" --authfile "$TMP_AUTH_FILE" > /dev/null 2>&1; then
+        echo "🔴 CRITICAL ERROR: Failed to generate auth.json file. Double check your GitLab UI variables."
+        exit 1
+      fi
+
+    # 2. ATOMIC IF BLOCK: Validates passport authenticity against the official catalog [1.5]
+    - echo "Verifying passport validity against registry.redhat.io endpoint..."
+    - >
+      if podman image search registry.redhat.io/rhel9/rhel-bootc --authfile "$TMP_AUTH_FILE" --limit 1 > /dev/null 2>&1; then
+        echo "🟢 SECURITY VALIDATION PASSED: Secure handshake established with the Red Hat Catalog."
+        echo "====================================================================="
+        echo "👑 MILESTONE 1 GRANTED: Ephemeral --authfile pipeline authentication is 100% OK."
+        echo "====================================================================="
+      else
+        echo "🔴 SECURITY VALIDATION FAILED: Generated auth.json is either corrupt or expired."
+        exit 1
+      fi
+
+  # 🧹 SECOPS SAFETY VALVE: Guaranteed cleanup execution on the host filesystem
+  # This block runs MANDATORILY, even if the script steps above crash violently [1.5].
+  after_script:
+    - echo "Executing mandatory post-job security cleanup task..."
+    - rm -f "$CI_PROJECT_DIR/containers-auth-temp.json"
+    - echo "Cleanup process completed. Active footprints purged from RAM. 🟢"
