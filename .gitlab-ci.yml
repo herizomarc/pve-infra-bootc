@@ -1,6 +1,6 @@
 ---
 # =========================================================================
-# 🔬 STEP 3.4: LIVE OPENBAO SSOT RAM EXTRACTION AND AUDIT FLOW
+# 👑 STEP 3.5: NATIVE OPENBAO CLI RAM EXTRACTION (THE PROFESSIONAL WAY)
 # =========================================================================
 
 stages:
@@ -9,52 +9,61 @@ stages:
 extract_bao_secrets:
   stage: test-ssot
   tags:
-    - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 executor node
+    - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 node
   variables:
     BAO_ADDR: "https://10.10.99.20:8200"
     BAO_SKIP_VERIFY: "true"
+    TMP_AUTH_FILE: "$CI_PROJECT_DIR/containers-auth-temp.json"
+    # ➔ Utilisation de l'image de conteneur officielle du projet OpenBao
+    BAO_CLIENT: "quay.io/openbao/openbao:latest"
     
-  # 🔐 MATCHING AUDIENCE: Must align with your OpenBao 'bound_audiences'
   id_tokens:
     SECURE_OIDC_TOKEN:
       aud: "https://gitlab.com"
       
   script:
     - set -e # 🛡️ FAIL-FAST [1.5]
-    - echo "🛡️ INITIATING LIVE SOUVEREIGN SECRETS EXTRACTION..."
+    - echo "🛡️ INITIATING LIVE SOUVEREIGN SECRETS EXTRACTION VIA NATIVE CLI..."
     
-    # 1. ATOMIC HANDSHAKE
+    # 1. NATIVE HANDSHAKE: Échange du jeton via le binaire officiel en 1 seule ligne propre [1.11]
     - >
-      export BAO_TOKEN=$(podman run --rm --network=host alpine:latest sh -c "
-        apk add --no-cache curl jq > /dev/null && \
-        curl -s -k --request POST --data '{\"role\": \"gitlab-infra-role\", \"jwt\": \"$SECURE_OIDC_TOKEN\"}' $BAO_ADDR/v1/auth/jwt/login | jq -r '.auth.client_token'
+      export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "
+        bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep client_token | awk '{print \$2}' | tr -d '\",'
       ")
 
-    # 2. ATOMIC RAM EXTRACTION (No disk footprint, pure memory mapping) [1.5, 1.11]
-    - echo "Querying OpenBao engine endpoints for RHEL entitlements..."
+    # 2. NATIVE FIELD EXTRACTIONS: Plus besoin de cURL ni de jQ ! Extraction directe par champ en RAM [1.11]
+    - echo "Streaming RHEL entitlements straight from OpenBao fields into RAM..."
     - >
-      export VAULT_RESPONSE=$(podman run --rm --network=host alpine:latest sh -c "
-        apk add --no-cache curl jq > /dev/null && \
-        curl -s -k -H \"X-Vault-Token: $BAO_TOKEN\" $BAO_ADDR/v1/secret/data/infrastructure/rhel-registry-entitlement
-      ")
-
-    # 3. SECOPS AUDIT CONTROLS: Parse inside RAM without echoing sensitive strings [1.5]
-    - export EXTRACTED_USER=$(echo "$VAULT_RESPONSE" | podman run --rm -i alpine:latest sh -c "apk add --no-cache jq > /dev/null && jq -r '.data.data.service_account_username'")
-    - export EXTRACTED_TOKEN=$(echo "$VAULT_RESPONSE" | podman run --rm -i alpine:latest sh -c "apk add --no-cache jq > /dev/null && jq -r '.data.data.service_account_token'")
-
-    # 4. CONDITIONAL BLOCK IF: Asserting data validity string lengths
+      export EXTRACTED_USER=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT \
+        bao kv get -field=service_account_username secret/infrastructure/rhel-registry-entitlement)
     - >
-      if [ -n "$EXTRACTED_USER" ] && [ -n "$EXTRACTED_TOKEN" ]; then
-        echo "🟢 SSOT VALIDATION PASSED: Secrets successfully mapped inside volatile RAM maps!"
-        echo "---------------------------------------------------------------------"
-        echo "📊 AUDIT FOOTPRINT TRACKING:"
-        # Displays safely the masked structure signature to prove it works [1.5]
-        echo "Service Account Target -> ${EXTRACTED_USER:0:7}******"
-        echo "Token Size Verified    -> $(echo -n '$EXTRACTED_TOKEN' | wc -c) bytes"
-        echo "====================================================================="
-        echo "👑 MILESTONE 3.4 GRANTED: Single Source of Truth is fully operational!"
-        echo "====================================================================="
-      else
-        echo "🔴 SSOT VALIDATION FAILED: OpenBao returned empty payload values."
+      export EXTRACTED_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT \
+        bao kv get -field=service_account_token secret/infrastructure/rhel-registry-entitlement)
+
+    # 3. CONDITIONAL SAFETY EXITS [1.5]
+    - >
+      if [ -z "$EXTRACTED_USER" ] || [ "$EXTRACTED_USER" = "null" ]; then
+        echo "🔴 SSOT CRITICAL FAULT: Extracted user via CLI is null or empty. Flow terminated."
         exit 1
       fi
+
+    - echo "🟢 SSOT VALIDATION PASSED Real secrets mapped inside volatile RAM maps!"
+    - echo "---------------------------------------------------------------------"
+    - echo "Service Account Target -> ${EXTRACTED_USER:0:7}******"
+    - echo "====================================================================="
+    
+    # 4. ATOMIC AUTHFILE PASS-THROUGH TESTING [1.5, 2.21]
+    - echo "Testing passport login generation against registry.redhat.io..."
+    - >
+      if ! podman login registry.redhat.io -u "$EXTRACTED_USER" -p "$EXTRACTED_TOKEN" --authfile "$TMP_AUTH_FILE" > /dev/null 2>&1; then
+        echo "🔴 REGISTRY FAULT: Generated authfile was rejected by Red Hat authentication gates."
+        exit 1
+      fi
+      
+    - echo "👑 MILESTONE 3.5 GRANTED Single Source of Truth architecture is live and fully verified!"
+
+  # 🧹 SECOPS SAFETY VALVE: Garantie absolue de destruction [1.5]
+  after_script:
+    - echo "Executing mandatory post-job security cleanup task..."
+    - rm -f "$CI_PROJECT_DIR/containers-auth-temp.json"
+    - echo "Cleanup process completed. Active footprints purged from RAM. 🟢"
