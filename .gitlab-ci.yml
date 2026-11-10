@@ -1,13 +1,13 @@
 ---
 # =========================================================================
-# 🔬 ISOLATED STAGE 2.5 TEST: IMMUTABLE QCOW2 DISK GENERATION WITH SMART WAIT
+# 👑 STEP 2.5: SYSTEMLESS IMMUTABLE QCOW2 GENERATION WITH SMART WAIT-LOOP
 # =========================================================================
 
 stages:
   - generate-disk
 
 variables:
-  # ➔ REAL CRYPTOGRAPHIC DIGEST SIGNATURE FROM YOUR REGISTER
+  # ➔ LOCKED CRYPTOGRAPHIC DIGEST SIGNATURE FROM YOUR REGISTER
   TARGET_CONTAINER_IMAGE: "://gitlab.com"
   BUILDER_TOOL: "quay.io/centos-bootc/bootc-image-builder:latest"
   TARGET_DISK: "$CI_PROJECT_DIR/output/qcow2/disk.qcow2"
@@ -24,11 +24,12 @@ test_disk_compilation:
     - rm -rf $CI_PROJECT_DIR/output
     - mkdir -p $CI_PROJECT_DIR/output
     
-    # 2. RUNNING THE NATIVE RED HAT BOOTC DISK COMPILER IN BACKGROUND [source: 2, 2.21]
-    - echo "📥 Launching asynchronous disk translation utilizing locked SHA256 digest..."
+    # 2. RUNNING THE NATIVE COMPILER WITH SYSTEMLESS ISOLATION [source: 2, 2.21]
+    # Mounts raw image layers storage paths directly to bypass systemd sockets dependencies [2.21]
+    - echo "📥 Launching background disk translation utilizing raw containers storage mounts..."
     - >
-      podman run --rm --privileged \
-        -v /var/run/podman/podman.sock:/var/run/podman/podman.sock \
+      podman run --rm --privileged --ipc=host \
+        -v /var/lib/containers/storage:/var/lib/containers/storage \
         -v $CI_PROJECT_DIR/output:/output \
         $BUILDER_TOOL \
         --type qcow2 \
