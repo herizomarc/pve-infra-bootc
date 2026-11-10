@@ -1,6 +1,6 @@
 ---
 # =========================================================================
-# 👑 STAGE 2.5: RED HAT BOOTCO DISK TRANSLATION (100% AUTOMATED & DYNAMIC)
+# 👑 STAGE 2.5: RED HAT BOOTCO DISK TRANSLATION (FIXED PATH SEEDING)
 # =========================================================================
 
 stages:
@@ -15,8 +15,8 @@ generate_qcow2_disk:
   tags:
     - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 executor node
   variables:
-    # ➔ 👑 GOLD STANDARD: Dynamically binds the exact registry image tag using the commit short SHA [1.5, 1.11]
-    LOCAL_TARGET_IMAGE: "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+    # ➔ 👑 FIXED: Appending the missing sub-directory manually to align with local cache structures
+    LOCAL_TARGET_IMAGE: "${CI_REGISTRY_IMAGE}/zabbix-bootc:3065db3c"
   script:
     - set -e # 🛡️ FAIL-FAST [1.5]
     - echo "⚙️ INITIATING APPLIANCE DISK TRANSLATION FOR CONTAINER TARGET -> ${LOCAL_TARGET_IMAGE}"
@@ -25,7 +25,7 @@ generate_qcow2_disk:
     - sudo rm -rf $CI_PROJECT_DIR/output
     - mkdir -p $CI_PROJECT_DIR/output
     
-    # 2. THE CACHE BRIDGE TRICK: Restreaming the freshly regenerated image layers into rootful space
+    # 2. THE CACHE BRIDGE TRICK: Restreaming matching local layers
     - echo "🔄 Syncing user image layer maps into local rootful storage structures..."
     - podman save ${LOCAL_TARGET_IMAGE} | sudo podman load
     - podman save ${BUILDER_TOOL} | sudo podman load
@@ -55,7 +55,7 @@ generate_qcow2_disk:
       fi
 
   artifacts:
-    name: "sovereign-zabbix-appliance-disk-$CI_COMMIT_SHORT_SHA"
+    name: "sovereign-zabbix-appliance-disk"
     expire_in: 1 day
     paths:
       - output/qcow2/disk.qcow2
