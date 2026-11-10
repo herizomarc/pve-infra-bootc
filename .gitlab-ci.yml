@@ -1,6 +1,6 @@
 ---
 # =========================================================================
-# 👑 PRODUCTION STAGE 2.5: CRYPTOGRAPHICALLY LOCKED DISK TRANSLATION
+# 👑 IDEMPOTENT & UNIVERSAL APPLIANCE DISK TRANSLATION MANIFEST
 # =========================================================================
 
 stages:
@@ -15,17 +15,19 @@ generate_qcow2_disk:
   tags:
     - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 executor node
   variables:
-    # ➔ 👑 ABSOLUTE SECOPS ANCHOR: Pointing directly to your verified image layer
-    LOCAL_TARGET_IMAGE: "gitlab.com"
+    # ➔ 👑 INDEPENDENT PATTERNS: Dynamically binds the exact image path based on project folder definitions
+    # Works seamlessly for zabbix-bootc, kubernetes-bootc, etc.
+    LOCAL_TARGET_IMAGE: "${CI_REGISTRY_IMAGE}/${CI_PROJECT_NAME}:${CI_COMMIT_SHORT_SHA}"
   script:
     - set -e # 🛡️ FAIL-FAST [1.5]
-    - echo "⚙️ INITIATING APPLIANCE DISK TRANSLATION FOR LOCKED TARGET -> ${LOCAL_TARGET_IMAGE}"
+    - echo "⚙️ INITIATING DYNAMIC GITOPS APPLIANCE DISK PACKAGING..."
+    - echo "📊 Target Image Signature Context -> ${LOCAL_TARGET_IMAGE}"
     
-    # 1. CLEANING AND PREPARING WORKSPACE WITH ELEVATED PRIVILEGES
+    # 1. IDEMPOTENT WORKSPACE PURGE: Ensures an empty fresh block storage mapping layout
     - sudo rm -rf $CI_PROJECT_DIR/output
     - mkdir -p $CI_PROJECT_DIR/output
     
-    # 2. THE CACHE BRIDGE TRICK: Serializing the exact sha256 layer map into rootful storage [2.21]
+    # 2. THE CACHE BRIDGE TRICK: restreaming exact commit-locked layer maps into rootful storage
     - echo "🔄 Syncing user image layer maps into local rootful storage structures..."
     - podman save ${LOCAL_TARGET_IMAGE} | sudo podman load
     - podman save ${BUILDER_TOOL} | sudo podman load
