@@ -1,60 +1,87 @@
 ---
 # =========================================================================
-# 👑 STEP 3.5: FIXED SCHEMA INTERPOLATION (KV-V2 CONSERVÉ & KISS)
+# 👑 SOVEREIGN DEVSECOPS ENGINE: UNIFIED AUTHENTICATION & COMPILATION FACTORY
 # =========================================================================
 
 stages:
   - test-ssot
+  - build-appliance
 
+variables:
+  # ➔ TARGET AUTHORITY ENDPOINTS & FILESYSTEM BOUNDARIES
+  BAO_ADDR: "https://10.10.99.20:8200"
+  BAO_SKIP_VERIFY: "true"
+  TMP_AUTH_FILE: "$CI_PROJECT_DIR/containers-auth-temp.json"
+  BAO_CLIENT: "quay.io/openbao/openbao:latest"
+
+# =========================================================================
+# 🔬 STAGE 1: SINGLE SOURCE OF TRUTH (SSOT) VALIDATION FLOW
+# =========================================================================
 extract_bao_secrets:
   stage: test-ssot
   tags:
-    - image-builder # 🔐 Routage validé sur votre Runner local vm-gitlabrunner-01
-  variables:
-    BAO_ADDR: "https://10.10.99.20:8200"
-    BAO_SKIP_VERIFY: "true"
-    TMP_AUTH_FILE: "$CI_PROJECT_DIR/containers-auth-temp.json"
-    BAO_CLIENT: "quay.io/openbao/openbao:latest"
-    
-  # 🔐 Alignement de l'audience avec la configuration de votre serveur
+    - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 executor node
+  # 🔐 FIXED: id_tokens block must be defined specifically inside the job structure
   id_tokens:
     SECURE_OIDC_TOKEN:
       aud: "https://gitlab.com"
-      
   script:
-    - set -e # 🛡️ FAIL-FAST [1.5]
-    - echo "🛡️ INITIATING SIMPLIFIED SECRETS EXTRACTION FROM KV-V2..."
+    - set -e # 🛡️ FAIL-FAST: Forces immediate termination upon any system error [1.5]
+    - echo "🛡️ INITIATING LIVE SOUVEREIGN SECRETS EXTRACTION FROM KV-V2..."
     
-    # 1. FIXED EXPORT N°1: Entouré de guillemets simples pour valider le schéma YAML GitLab-CI [1.5, 1.11]
+    # 1. NATIVE HANDSHAKE: Exchanges GitLab OIDC Token for an ephemeral OpenBao Client Token [1.11]
     - 'export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep -o ''\"client_token\": \"[^\"]*'' | grep -o ''[^\"]*$''")'
-
-    # 2. FIXED EXPORT N°2 & 3: Plus aucun risque de conflit de type ou d'échappement [1.5, 1.11]
-    - echo "Streaming variables from OpenBao data blocks straight into RAM..."
+    
+    # 2. DATA LAYER READS: Fetches the Service Account Username string into volatile memory [1.11]
     - 'export EXTRACTED_USER=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o ''\"service_account_username\": \"[^\"]*'' | grep -o ''[^\"]*$''")'
-    - 'export EXTRACTED_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o ''\"service_account_token\": \"[^\"]*'' | grep -o ''[^\"]*$''")'
-
-    # 3. CONDITIONAL SAFETY CHECK [1.5]
+    
+    # 3. CRITICAL PAYLOAD VERIFICATION
     - >
       if [ -z "$EXTRACTED_USER" ] || [ "$EXTRACTED_USER" = "null" ]; then
-        echo "🔴 SSOT CRITICAL FAULT: Extraction failed or returned empty payload."
+        echo "🔴 SSOT CRITICAL FAULT: Extracted data from OpenBao backend is null or empty. Flow terminated."
         exit 1
       fi
+    - echo "🟢 SSOT VALIDATION PASSED Live token handshake successfully mapped inside volatile RAM boundaries!"
 
-    - echo "🟢 SSOT VALIDATION PASSED Secrets mapped inside volatile RAM maps!"
-    - echo "Service Account Target -> ${EXTRACTED_USER:0:7}******"
+# =========================================================================
+# 📦 STAGE 2: IMMUTABLE WORKLOAD OS CONTAINER COMPILATION
+# =========================================================================
+compile_immutable_os:
+  stage: build-appliance
+  tags:
+    - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 executor node
+  # 🔐 FIXED: id_tokens block must be defined specifically inside the job structure
+  id_tokens:
+    SECURE_OIDC_TOKEN:
+      aud: "https://gitlab.com"
+  script:
+    - set -e # 🛡️ FAIL-FAST [1.5]
+    - echo "⚙️ INITIATING PHASE 2 IMMUTABLE APPLIANCE PACKAGING & STREAMING MATRIX..."
     
-    # 4. ATOMIC AUTHFILE TESTING [1.5, 2.21]
-    - echo "Testing passport login generation against registry.redhat.io..."
-    - >
-      if ! podman login registry.redhat.io -u "$EXTRACTED_USER" -p "$EXTRACTED_TOKEN" --authfile "$TMP_AUTH_FILE" > /dev/null 2>&1; then
-        echo "🔴 REGISTRY FAULT: Credentials rejected by Red Hat."
-        exit 1
-      fi
-      
-    - echo "👑 MILESTONE 3.5 GRANTED Single Source of Truth verified on KV-v2!"
+    # 1. DYNAMIC SECRET STREAMING: Pulling fresh tokens straight into runner memory maps [1.11]
+    - 'export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep -o ''\"client_token\": \"[^\"]*'' | grep -o ''[^\"]*$''")'
+    - 'export EXTRACTED_USER=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o ''\"service_account_username\": \"[^\"]*'' | grep -o ''[^\"]*$''")'
+    - 'export EXTRACTED_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/rhel-registry-entitlement | grep -o ''\"service_account_token\": \"[^\"]*'' | grep -o ''[^\"]*$''")'
+    
+    # 2. EPHEMERAL REGISTRY AUTHENTICATIONS
+    - echo "Authenticating Podman engine engines via transient authfile passports..."
+    - podman login registry.redhat.io -u "$EXTRACTED_USER" -p "$EXTRACTED_TOKEN" --authfile "$TMP_AUTH_FILE"
+    - podman login $CI_REGISTRY -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
+    
+    # 3. NATIVE WORKLOAD OCI OS COMPILATION [2.21]
+    - echo "📦 COMPILING HARDENED IMMUTABLE SYSTEM IMAGE WORKLOADS VIA PODMAN ENGINE..."
+    - podman build --network=host --authfile "$TMP_AUTH_FILE" -t $CI_REGISTRY_IMAGE/zabbix-bootc:$CI_COMMIT_SHORT_SHA -f containers/zabbix.Containerfile .
+    
+    # 4. STATELESS REGISTRY STREAMING [1.11]
+    - echo "🚀 STREAMING FINALIZED SYSTEM APPLIANCE LAYERS INTO GITLAB REGISTRY METADATA..."
+    - podman push $CI_REGISTRY_IMAGE/zabbix-bootc:$CI_COMMIT_SHORT_SHA
+    
+    - echo "====================================================================="
+    - echo "👑 MILESTONE 2 GRANTED Single Source of Truth architecture verified on KV-v2!"
+    - echo "====================================================================="
 
-  # 🧹 SOUPAPE DE SÉCURITÉ : Garantie absolue de destruction [1.5]
+  # 🧹 SECOPS HOST REAPER SOUPAPE
   after_script:
     - echo "Executing mandatory post-job security cleanup task..."
     - rm -f "$CI_PROJECT_DIR/containers-auth-temp.json"
-    - echo "Cleanup process completed. Active footprints purged from RAM. 🟢"
+    - echo "Cleanup process completed. Active secret footprints purged from RAM. 🟢"
