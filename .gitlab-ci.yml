@@ -1,14 +1,12 @@
 ---
 # =========================================================================
-# 👑 STAGE 2.5: OFFICIAL RED HAT BOOTCO DISK TRANSLATION MATRIX (SYNCHRONOUS)
+# 👑 STAGE 2.5: RED HAT BOOTCO DISK TRANSLATION (100% AUTOMATED & DYNAMIC)
 # =========================================================================
 
 stages:
   - generate-disk
 
 variables:
-  # ➔ TARGET ARTIFACT AND CONTAINER DISK DEFINITIONS
-  TARGET_CONTAINER_IMAGE: "://gitlab.com"
   BUILDER_TOOL: "quay.io/centos-bootc/bootc-image-builder:latest"
   TARGET_DISK: "$CI_PROJECT_DIR/output/qcow2/disk.qcow2"
 
@@ -16,30 +14,32 @@ generate_qcow2_disk:
   stage: generate-disk
   tags:
     - image-builder # 🔐 Anchored on your local vm-gitlabrunner-01 executor node
+  variables:
+    # ➔ 👑 GOLD STANDARD: Dynamically binds the exact registry image tag using the commit short SHA [1.5, 1.11]
+    LOCAL_TARGET_IMAGE: "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
   script:
-    - set -e # 🛡️ FAIL-FAST: Forces immediate termination upon any failure [1.5]
-    - echo "⚙️ INITIATING APPLIANCE DISK TRANSLATION MATRIX VIA OFFICIAL RED HAT METHOD..."
+    - set -e # 🛡️ FAIL-FAST [1.5]
+    - echo "⚙️ INITIATING APPLIANCE DISK TRANSLATION FOR CONTAINER TARGET -> ${LOCAL_TARGET_IMAGE}"
     
     # 1. CLEANING AND PREPARING WORKSPACE WITH ELEVATED PRIVILEGES
     - sudo rm -rf $CI_PROJECT_DIR/output
     - mkdir -p $CI_PROJECT_DIR/output
     
-    # 2. THE CACHE BRIDGE TRICK: Migrating user layers into rootful storage contexts
+    # 2. THE CACHE BRIDGE TRICK: Restreaming the freshly regenerated image layers into rootful space
     - echo "🔄 Syncing user image layer maps into local rootful storage structures..."
-    - podman save $TARGET_CONTAINER_IMAGE | sudo podman load
-    - podman save $BUILDER_TOOL | sudo podman load
+    - podman save ${LOCAL_TARGET_IMAGE} | sudo podman load
+    - podman save ${BUILDER_TOOL} | sudo podman load
     
     # 3. NATIVE SYNCHRONOUS COMPILATION [1.10, source: 2, 2.21]
-    # No ampersand (&), no loop loops. The pipeline waits natively for Red Hat to finish the disk.
     - echo "📥 Launching synchronous rootful disk translation utilizing local storage layers..."
     - >
       sudo podman run --rm --privileged --ipc=host \
         -v /var/lib/containers/storage:/var/lib/containers/storage \
         -v $CI_PROJECT_DIR/output:/output \
-        $BUILDER_TOOL \
+        ${BUILDER_TOOL} \
         --type qcow2 \
         --local \
-        $TARGET_CONTAINER_IMAGE
+        ${LOCAL_TARGET_IMAGE}
 
     # 4. FINAL INTEGRITY CHECKS
     - echo "🔍 Executing final filesystem integrity checks..."
@@ -54,9 +54,8 @@ generate_qcow2_disk:
         exit 1
       fi
 
-  # 📦 PRESERVING MASTER DISK LIVRABLE FOR JALON PROVISIONING
   artifacts:
-    name: "sovereign-zabbix-appliance-disk"
+    name: "sovereign-zabbix-appliance-disk-$CI_COMMIT_SHORT_SHA"
     expire_in: 1 day
     paths:
       - output/qcow2/disk.qcow2
