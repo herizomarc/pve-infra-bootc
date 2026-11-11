@@ -43,8 +43,9 @@ provision_vm_proxmox:
       export TF_VAR_vm_id="$VM_ID"
       
       # 3. Execute OpenTofu provisioning via ephemeral container
+            # 3. Execute OpenTofu provisioning via ephemeral container (with :Z for SELinux)
       podman run --rm --network=host \
-        -v "$CI_PROJECT_DIR/terraform:/workspace" \
+        -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
         -w /workspace \
         -e TF_VAR_proxmox_api_endpoint \
         -e TF_VAR_proxmox_api_token_id \
@@ -56,7 +57,7 @@ provision_vm_proxmox:
         "$TOFU_IMAGE" init
         
       podman run --rm --network=host \
-        -v "$CI_PROJECT_DIR/terraform:/workspace" \
+        -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
         -w /workspace \
         -e TF_VAR_proxmox_api_endpoint \
         -e TF_VAR_proxmox_api_token_id \
@@ -66,5 +67,6 @@ provision_vm_proxmox:
         -e TF_VAR_disk_image_name \
         -e TF_VAR_vm_id \
         "$TOFU_IMAGE" apply -auto-approve
+
         
       echo "🟢 OPENTOFU PROVISIONING SUCCEEDED: VM srv-${APPLIANCE_NAME}-prod (ID ${VM_ID}) is up and running!"
