@@ -1,13 +1,12 @@
 ---
 # =========================================================================
-# 🔬 ISOLATED TEST: DYNAMIC OPENTOFU PROVISIONING ON PROXMOX
+# 🔐 SECURE TEST: OPENTOFU PROVISIONING ON PROXMOX (MASKED OUTPUTS)
 # =========================================================================
 
 stages:
   - deploy-infrastructure
 
 variables:
-  # ➔ OPENBAO & OPENTOFU ENDPOINTS
   BAO_ADDR: "https://10.10.99.20:8200"
   BAO_SKIP_VERIFY: "true"
   BAO_CLIENT: "quay.io/openbao/openbao:latest"
@@ -28,22 +27,25 @@ provision_vm_proxmox:
       aud: "https://gitlab.com"
   script:
     - |
-      set -euxo pipefail
+      # 🛡️ SECURITY: -x flag intentionally omitted to prevent printing secrets in CI logs
+      set -euo pipefail
       
-      # 1. Dynamic extraction of Proxmox API credentials from OpenBao into RAM
+      echo "🔐 Authenticating with OpenBao and extracting Proxmox credentials into RAM..."
       export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep -o '\"client_token\": \"[^\"]*' | grep -o '[^\"]*$'")
       export TF_VAR_proxmox_api_endpoint=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/proxmox-credentials | grep -o '\"api_endpoint\": \"[^\"]*' | grep -o '[^\"]*$'")
       export TF_VAR_proxmox_api_token_id=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/proxmox-credentials | grep -o '\"api_token_id\": \"[^\"]*' | grep -o '[^\"]*$'")
       export TF_VAR_proxmox_api_token_secret=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/proxmox-credentials | grep -o '\"api_token_secret\": \"[^\"]*' | grep -o '[^\"]*$'")
       
-      # 2. Bind dynamic infrastructure variables for OpenTofu
+      # Bind dynamic infrastructure variables
       export TF_VAR_proxmox_node_name="$PVE_NODE"
       export TF_VAR_appliance_name="$APPLIANCE_NAME"
       export TF_VAR_disk_image_name="$DISK_IMAGE_NAME"
       export TF_VAR_vm_id="$VM_ID"
       
-      # 3. Execute OpenTofu provisioning via ephemeral container
-            # 3. Execute OpenTofu provisioning via ephemeral container (with :Z for SELinux)
+      echo "🔍 Verifying Terraform workspace files..."
+      ls -lh "$CI_PROJECT_DIR/terraform/"
+      
+      echo "🏗️ Initializing and executing OpenTofu deployment..."
       podman run --rm --network=host \
         -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
         -w /workspace \
@@ -67,6 +69,5 @@ provision_vm_proxmox:
         -e TF_VAR_disk_image_name \
         -e TF_VAR_vm_id \
         "$TOFU_IMAGE" apply -auto-approve
-
         
       echo "🟢 OPENTOFU PROVISIONING SUCCEEDED: VM srv-${APPLIANCE_NAME}-prod (ID ${VM_ID}) is up and running!"
