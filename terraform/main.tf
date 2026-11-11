@@ -17,11 +17,12 @@ provider "proxmox" {
   insecure  = true
 }
 
-resource "proxmox_virtual_machine" "immutable_appliance" {
+# ➔ NOM EXACT DE LA RESSOURCE POUR BPG/PROXMOX
+resource "proxmox_virtual_environment_vm" "immutable_appliance" {
   name        = "srv-${var.appliance_name}-prod"
   description = "Sovereign Immutable Appliance (${var.appliance_name}) managed by OpenTofu & BootC"
   node_name   = var.proxmox_node_name
-  vmid        = var.vm_id
+  vm_id       = var.vm_id
   started     = true
 
   cpu {
