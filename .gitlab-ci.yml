@@ -1,43 +1,70 @@
 ---
 # =========================================================================
-# 🔬 ISOLATED TEST: STAGE 2 ONLY (RED HAT OFFICIAL QCOW2 PACKAGING)
+# 🔬 ISOLATED TEST: DYNAMIC OPENTOFU PROVISIONING ON PROXMOX
 # =========================================================================
 
 stages:
-  - package
+  - deploy-infrastructure
 
 variables:
-  # ➔ Ciblage temporaire de votre image d'hier pour le test rapide
-  IMAGE_NAME: "$CI_REGISTRY_IMAGE/zabbix-bootc"
-  IMAGE_TAG: "3065db3c"
-  BUILDER_IMAGE: "quay.io/centos-bootc/bootc-image-builder:latest"
+  # ➔ OPENBAO & OPENTOFU ENDPOINTS
+  BAO_ADDR: "https://10.10.99.20:8200"
+  BAO_SKIP_VERIFY: "true"
+  BAO_CLIENT: "quay.io/openbao/openbao:latest"
+  TOFU_IMAGE: "ghcr.io/opentofu/opentofu:latest"
+  
+  # ➔ DYNAMIC INFRASTRUCTURE VARIABLES
+  PVE_NODE: "pve1"
+  APPLIANCE_NAME: "zabbix-bootc"
+  DISK_IMAGE_NAME: "${APPLIANCE_NAME}.img"
+  VM_ID: "105"
 
-build_disk_image:
-  stage: package
+provision_vm_proxmox:
+  stage: deploy-infrastructure
   tags:
     - image-builder
+  id_tokens:
+    SECURE_OIDC_TOKEN:
+      aud: "https://gitlab.com"
   script:
     - |
       set -euxo pipefail
       
-      # 1. Préparation idempotente du répertoire de sortie
-      sudo rm -rf "$CI_PROJECT_DIR/output"
-      mkdir -p "$CI_PROJECT_DIR/output"
+      # 1. Dynamic extraction of Proxmox API credentials from OpenBao into RAM
+      export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep -o '\"client_token\": \"[^\"]*' | grep -o '[^\"]*$'")
+      export TF_VAR_proxmox_api_endpoint=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/proxmox-credentials | grep -o '\"api_endpoint\": \"[^\"]*' | grep -o '[^\"]*$'")
+      export TF_VAR_proxmox_api_token_id=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/proxmox-credentials | grep -o '\"api_token_id\": \"[^\"]*' | grep -o '[^\"]*$'")
+      export TF_VAR_proxmox_api_token_secret=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/proxmox-credentials | grep -o '\"api_token_secret\": \"[^\"]*' | grep -o '[^\"]*$'")
       
-      # 2. Connexion et Pull explicite en mode rootful (Standard Red Hat)
-      sudo podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
-      sudo podman pull "$IMAGE_NAME:$IMAGE_TAG"
+      # 2. Bind dynamic infrastructure variables for OpenTofu
+      export TF_VAR_proxmox_node_name="$PVE_NODE"
+      export TF_VAR_appliance_name="$APPLIANCE_NAME"
+      export TF_VAR_disk_image_name="$DISK_IMAGE_NAME"
+      export TF_VAR_vm_id="$VM_ID"
       
-      # 3. Conversion directe en QCOW2
-      sudo podman run --rm --privileged \
-        -v /var/lib/containers/storage:/var/lib/containers/storage \
-        -v "$CI_PROJECT_DIR/output:/output" \
-        "$BUILDER_IMAGE" \
-        --type qcow2 \
-        "$IMAGE_NAME:$IMAGE_TAG"
+      # 3. Execute OpenTofu provisioning via ephemeral container
+      podman run --rm --network=host \
+        -v "$CI_PROJECT_DIR/terraform:/workspace" \
+        -w /workspace \
+        -e TF_VAR_proxmox_api_endpoint \
+        -e TF_VAR_proxmox_api_token_id \
+        -e TF_VAR_proxmox_api_token_secret \
+        -e TF_VAR_proxmox_node_name \
+        -e TF_VAR_appliance_name \
+        -e TF_VAR_disk_image_name \
+        -e TF_VAR_vm_id \
+        "$TOFU_IMAGE" init
         
-      # 4. Vérification du livrable local
-      ls -lh "$CI_PROJECT_DIR/output/qcow2/disk.qcow2"
-      echo "🟢 DISK GENERATION VALIDATED!"
-  after_script:
-    - sudo podman logout "$CI_REGISTRY" || true
+      podman run --rm --network=host \
+        -v "$CI_PROJECT_DIR/terraform:/workspace" \
+        -w /workspace \
+        -e TF_VAR_proxmox_api_endpoint \
+        -e TF_VAR_proxmox_api_token_id \
+        -e TF_VAR_proxmox_api_token_secret \
+        -e TF_VAR_proxmox_node_name \
+        -e TF_VAR_appliance_name \
+        -e TF_VAR_disk_image_name \
+        -e TF_VAR_vm_id \
+        "$TOFU_IMAGE" apply -auto-approve
+        
+      echo "🟢 OPENTOFU PROVISIONING SUCCEEDED: VM srv-${APPLIANCE_NAME}-prod (ID ${VM_ID}) is up and running!"
