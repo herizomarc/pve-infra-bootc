@@ -175,6 +175,7 @@ deploy_proxmox_vm:
       # 6. Apply declarative matrix (terraform.tfvars) with forwarded SSH Agent socket
       echo "Applying infrastructure state on Proxmox ($PVE_NODE_NAME)..."
       podman run --rm --network=host \
+        --security-opt label=disable \
         -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
         -v "${SHARED_DISK_DIR}/disk.qcow2:/disk.qcow2:ro,Z" \
         -v "${SSH_AUTH_SOCK}:/ssh-agent.sock" \
@@ -188,6 +189,7 @@ deploy_proxmox_vm:
         -e TF_VAR_local_disk_path \
         -w /workspace \
         "$TOFU_IMAGE" apply -auto-approve
+
 
       # 7. Purge staged .img archive from Proxmox ISO storage once imported into LVM
       ssh -o StrictHostKeyChecking=no "root@${PVE_SSH_HOST}" "rm -f /var/lib/vz/template/iso/${APPLIANCE_NAME}-${IMAGE_TAG}.img" || true
