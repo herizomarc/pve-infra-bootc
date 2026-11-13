@@ -52,16 +52,18 @@ resource "proxmox_virtual_environment_vm" "appliances" {
     }
   }
 
-  # Dynamic disk allocation: scsi0 gets the BootC OS image, others are blank data volumes
+    # Dynamic disk allocation: scsi0 gets the BootC OS image, others are blank data volumes
   dynamic "disk" {
     for_each = each.value.storage_disks
     content {
       datastore_id = var.datastore_vm
       interface    = disk.value.interface
       size         = disk.value.size_gb
+      file_format  = "raw"
       file_id      = disk.value.interface == "scsi0" ? proxmox_virtual_environment_file.appliance_disk.id : null
     }
   }
+
 
   # UEFI firmware required for modern RHEL BootC deployments
   bios = "ovmf"
