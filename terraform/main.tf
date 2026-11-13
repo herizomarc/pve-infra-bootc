@@ -15,7 +15,23 @@ resource "proxmox_virtual_environment_file" "appliance_disk" {
   }
 }
 
-# 2. Instantiate and boot all virtual machines defined in terraform.tfvars
+# 2. Generate dynamic Cloud-Init snippet from template
+resource "proxmox_virtual_environment_file" "cloud_init_config" {
+  for_each     = var.virtual_machines
+  content_type = "snippets"
+  datastore_id = var.datastore_iso
+  node_name    = var.proxmox_node_name
+  overwrite    = true
+
+  source_raw {
+    file_name = "${each.key}-user-data.yml"
+    data = templatefile("/templates/zabbix.yml.tmpl", {
+      ssh_key = trimspace(var.secops_ssh_public_key)
+    })
+  }
+}
+
+# 3. Instantiate and boot all virtual machines defined in terraform.tfvars
 resource "proxmox_virtual_environment_vm" "appliances" {
   for_each = var.virtual_machines
 
@@ -25,7 +41,6 @@ resource "proxmox_virtual_environment_vm" "appliances" {
   vm_id       = each.value.vm_id
   started     = true
 
-  # Enable QEMU Guest Agent for IP reporting and graceful shutdowns
   agent {
     enabled = true
   }
@@ -44,6 +59,8 @@ resource "proxmox_virtual_environment_vm" "appliances" {
   }
 
   initialization {
+    user_data_file_id = proxmox_virtual_environment_file.cloud_init_config[each.key].id
+
     ip_config {
       ipv4 {
         address = each.value.ip_address
@@ -52,7 +69,6 @@ resource "proxmox_virtual_environment_vm" "appliances" {
     }
   }
 
-    # Dynamic disk allocation: scsi0 gets the BootC OS image, others are blank data volumes
   dynamic "disk" {
     for_each = each.value.storage_disks
     content {
@@ -64,8 +80,6 @@ resource "proxmox_virtual_environment_vm" "appliances" {
     }
   }
 
-
-  # UEFI firmware required for modern RHEL BootC deployments
   bios = "ovmf"
   efi_disk {
     datastore_id = var.datastore_vm

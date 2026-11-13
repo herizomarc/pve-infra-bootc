@@ -23,6 +23,9 @@ variables:
   BAO_ROLE: "gitlab-infra-role"
   BAO_SECRET_RHEL: "secret/infrastructure/rhel-registry-entitlement"
   BAO_SECRET_PVE: "secret/infrastructure/proxmox-credentials"
+  BAO_SECRET_SECOPS_PASS: "secret/infrastructure/secops-console-credential"
+  BAO_SECRET_SECOPS_SSH: "secret/infrastructure/secops-host-authentication"
+
 
 default:
   before_script:
@@ -141,7 +144,9 @@ deploy_proxmox_vm:
       # 2. Extract Proxmox API credentials into memory
       export TF_VAR_proxmox_api_token_id=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=api_token_id "$BAO_SECRET_PVE")
       export TF_VAR_proxmox_api_token_secret=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=api_token_secret "$BAO_SECRET_PVE")
-      
+      export TF_VAR_secops_password=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=yescrypt_password_hash "$BAO_SECRET_SECOPS_PASS")
+      export TF_VAR_secops_ssh_public_key=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=ed25519_public_key "$BAO_SECRET_SECOPS_SSH")
+
       # 3. Load SSH private key directly into memory agent (Zero disk write)
       eval $(ssh-agent -s)
       podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=ssh_private_key "$BAO_SECRET_PVE" | ssh-add -
@@ -177,18 +182,21 @@ deploy_proxmox_vm:
       podman run --rm --network=host \
         --security-opt label=disable \
         -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
+        -v "$CI_PROJECT_DIR/templates:/templates:ro,Z" \
         -v "${SHARED_DISK_DIR}/disk.qcow2:/disk.qcow2:ro,Z" \
         -v "${SSH_AUTH_SOCK}:/ssh-agent.sock" \
         -e SSH_AUTH_SOCK="/ssh-agent.sock" \
         -e TF_VAR_proxmox_api_endpoint \
         -e TF_VAR_proxmox_api_token_id \
         -e TF_VAR_proxmox_api_token_secret \
+        -e TF_VAR_secops_ssh_public_key \
         -e TF_VAR_proxmox_node_name \
         -e TF_VAR_appliance_name \
         -e TF_VAR_image_tag \
         -e TF_VAR_local_disk_path \
         -w /workspace \
         "$TOFU_IMAGE" apply -auto-approve
+
 
 
       # 7. Purge staged .img archive from Proxmox ISO storage once imported into LVM
