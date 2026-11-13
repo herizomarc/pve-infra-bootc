@@ -1,93 +1,72 @@
 # =========================================================================
-# 👑 OPENTOFU / TERRAFORM PROXMOX AUTOMATED PROVISIONING MANIFEST
+# PROXMOX VIRTUAL MACHINE & STORAGE PROVISIONING
 # =========================================================================
 
-terraform {
-  required_providers {
-    proxmox = {
-      source  = "bpg/proxmox"
-      version = "0.66.0"
-    }
+# 1. Stage QCOW2 disk image onto Proxmox datastore
+resource "proxmox_virtual_environment_file" "appliance_disk" {
+  content_type = "iso"
+  datastore_id = var.datastore_iso
+  node_name    = var.proxmox_node_name
+  overwrite    = true
+
+  source_file {
+    path      = var.local_disk_path
+    file_name = "${var.appliance_name}-${var.image_tag}.img"
   }
 }
 
-provider "proxmox" {
-  endpoint  = var.proxmox_api_endpoint
-  api_token = "${var.proxmox_api_token_id}=${var.proxmox_api_token_secret}"
-  insecure  = true
-}
+# 2. Instantiate and boot all virtual machines defined in terraform.tfvars
+resource "proxmox_virtual_environment_vm" "appliances" {
+  for_each = var.virtual_machines
 
-# ➔ NOM EXACT DE LA RESSOURCE POUR BPG/PROXMOX
-resource "proxmox_virtual_environment_vm" "immutable_appliance" {
-  name        = "srv-${var.appliance_name}-prod"
-  description = "Sovereign Immutable Appliance (${var.appliance_name}) managed by OpenTofu & BootC"
+  name        = "srv-${each.key}"
+  description = "${each.value.description} (${var.appliance_name}:${var.image_tag})"
   node_name   = var.proxmox_node_name
-  vm_id       = var.vm_id
+  vm_id       = each.value.vm_id
   started     = true
 
+  # Enable QEMU Guest Agent for IP reporting and graceful shutdowns
+  agent {
+    enabled = true
+  }
+
   cpu {
-    cores = 2
+    cores = each.value.cpu_cores
     type  = "host"
   }
 
   memory {
-    dedicated = 4096
+    dedicated = each.value.memory_mb
   }
 
   network_device {
-    bridge = "vmbr0"
+    bridge = var.network_bridge
   }
 
-  # Dynamic disk attachment from Proxmox ISO/IMG storage
-  disk {
-    datastore_id = "local-lvm"
-    file_id      = "local:iso/${var.disk_image_name}"
-    interface    = "scsi0"
-    size         = 20
+  initialization {
+    ip_config {
+      ipv4 {
+        address = each.value.ip_address
+        gateway = each.value.gateway_ip
+      }
+    }
   }
 
-  # UEFI configuration required for modern RHEL BootC images
+  # Dynamic disk allocation: scsi0 gets the BootC OS image, others are blank data volumes
+  dynamic "disk" {
+    for_each = each.value.storage_disks
+    content {
+      datastore_id = var.datastore_vm
+      interface    = disk.value.interface
+      size         = disk.value.size_gb
+      file_id      = disk.value.interface == "scsi0" ? proxmox_virtual_environment_file.appliance_disk.id : null
+    }
+  }
+
+  # UEFI firmware required for modern RHEL BootC deployments
   bios = "ovmf"
   efi_disk {
-    datastore_id = "local-lvm"
+    datastore_id = var.datastore_vm
     type         = "4m"
   }
-}
-
-# =========================================================================
-# 📊 DYNAMIC INPUT VARIABLES (INJECTED NATIVELY FROM PIPELINE RAM)
-# =========================================================================
-variable "proxmox_api_endpoint" {
-  type = string
-}
-
-variable "proxmox_api_token_id" {
-  type = string
-}
-
-variable "proxmox_api_token_secret" {
-  type      = string
-  sensitive = true
-}
-
-variable "proxmox_node_name" {
-  type        = string
-  default     = "pve1"
-  description = "Target Proxmox cluster node name"
-}
-
-variable "appliance_name" {
-  type        = string
-  description = "Dynamic appliance identifier"
-}
-
-variable "disk_image_name" {
-  type        = string
-  description = "Target disk image filename on Proxmox storage"
-}
-
-variable "vm_id" {
-  type        = number
-  default     = 105
-  description = "Unique Virtual Machine ID on Proxmox"
 }

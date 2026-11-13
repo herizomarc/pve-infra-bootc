@@ -1,0 +1,45 @@
+#cloud-config
+autostart: true
+
+# AUTOMATED SECONDARY VOLUME PARTITIONING
+disk_setup:
+  /dev/sdb:
+    table_type: 'gpt'
+    layout: true
+    overwrite: false
+
+fs_setup:
+  - filesystem: xfs
+    device: /dev/sdb1
+
+mounts:
+  - [ /dev/sdb1, /var/lib/pgsql, xfs, "defaults,noatime", "0", "0" ]
+
+users:
+  - name: secops
+    groups: wheel
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+      - "${ssh_key}"
+
+runcmd:
+  - chown -R postgres:postgres /var/lib/pgsql
+  - postgresql-setup --initdb --unit postgresql
+  - systemctl start postgresql
+  
+  # SECOPS ENFORCED: Generate a cryptographically secure random token in transient RAM memory
+  - DB_DYNAMIC_PASS=$(openssl rand -base64 24)
+  
+  - sudo -u postgres psql -c "CREATE USER zabbix WITH PASSWORD '${DB_DYNAMIC_PASS}';"
+  - sudo -u postgres psql -c "CREATE DATABASE zabbix OWNER zabbix;"
+  - zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | sudo -u zabbix psql zabbix
+  - sed -i "s/# DBPassword=/DBPassword=${DB_DYNAMIC_PASS}/" /etc/zabbix/zabbix_server.conf
+  - unset DB_DYNAMIC_PASS
+  
+  - sed -i 's/# listen 80;/listen 80;/' /etc/nginx/conf.d/zabbix.conf
+  - sed -i 's/# server_name example.com;/server_name _;//' /etc/nginx/conf.d/zabbix.conf
+  - firewall-cmd --permanent --add-service={http,https}
+  - firewall-cmd --permanent --add-port=10051/tcp
+  - firewall-cmd --reload
+  - systemctl restart postgresql zabbix-server nginx php-fpm

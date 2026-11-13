@@ -1,7 +1,27 @@
-.terraform/
+# =========================================================================
+# OPENTOFU / TERRAFORM (LOCAL PLUGINS & SENSITIVE STATE FILES)
+# =========================================================================
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+secrets.auto.tfvars
+
+# =========================================================================
+# BOOTC DISK IMAGES & COMPILATION ARTIFACTS
+# =========================================================================
+output/
+build-output/
+*.qcow2
+*.img
 *.ids
 *.manifest
-*.qcow2
-secrets.auto.tfvars
-.terraform.lock.hcl
-build-output/
+
+# =========================================================================
+# CRYPTOGRAPHIC KEYS, CERTIFICATES & TEMPORARY TOKENS
+# =========================================================================
+*.pem
+*.key
+*id_rsa*
+*id_ed25519*
+*priv_key*
+*auth*.json

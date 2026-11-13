@@ -1,25 +1,38 @@
 ---
 # =========================================================================
-# 🔐 SECURE TEST: OPENTOFU PROVISIONING ON PROXMOX (MASKED OUTPUTS)
+# 👑 UNIVERSAL DEVSECOPS PIPELINE: RHEL BOOTC -> QCOW2 -> PROXMOX (FINAL)
 # =========================================================================
 
 stages:
-  - deploy-infrastructure
+  - build-os
+  - package-disk
+  - deploy-infra
 
 variables:
-  BAO_ADDR: "https://10.10.99.20:8200"
+  GIT_CLEAN_FLAGS: "none"
+  SHARED_DISK_DIR: "/var/lib/gitlab-runner/share/${CI_PROJECT_NAME}"
+  TMP_AUTH_FILE: "/dev/shm/containers-auth-${CI_JOB_ID}.json"
+  APPLIANCE_NAME: "zabbix-bootc"
+  CONTAINERFILE_PATH: "containers/zabbix.Containerfile"
+  IMAGE_NAME: "$CI_REGISTRY_IMAGE/$APPLIANCE_NAME"
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+  BUILDER_IMAGE: "quay.io/centos-bootc/bootc-image-builder:latest"
+  TOFU_IMAGE: "ghcr.io/opentofu/opentofu:latest"
   BAO_SKIP_VERIFY: "true"
   BAO_CLIENT: "quay.io/openbao/openbao:latest"
-  TOFU_IMAGE: "ghcr.io/opentofu/opentofu:latest"
-  
-  # ➔ DYNAMIC INFRASTRUCTURE VARIABLES
-  PVE_NODE: "pve1"
-  APPLIANCE_NAME: "zabbix-bootc"
-  DISK_IMAGE_NAME: "${APPLIANCE_NAME}.img"
-  VM_ID: "105"
+  BAO_ROLE: "gitlab-infra-role"
+  BAO_SECRET_RHEL: "secret/infrastructure/rhel-registry-entitlement"
+  BAO_SECRET_PVE: "secret/infrastructure/proxmox-credentials"
 
-provision_vm_proxmox:
-  stage: deploy-infrastructure
+default:
+  before_script:
+    - sudo rm -rf "$CI_PROJECT_DIR/output" "$TMP_AUTH_FILE"
+
+# =========================================================================
+# STAGE 1: BUILD & PUSH IMMUTABLE OS CONTAINER (SHORT SHA + LATEST)
+# =========================================================================
+build_bootc_image:
+  stage: build-os
   tags:
     - image-builder
   id_tokens:
@@ -27,47 +40,156 @@ provision_vm_proxmox:
       aud: "https://gitlab.com"
   script:
     - |
-      # 🛡️ SECURITY: -x flag intentionally omitted to prevent printing secrets in CI logs
       set -euo pipefail
+      echo "Authenticating with OpenBao SSOT in volatile RAM..."
       
-      echo "🔐 Authenticating with OpenBao and extracting Proxmox credentials into RAM..."
-      export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY $BAO_CLIENT sh -c "bao write -format=json auth/jwt/login role=gitlab-infra-role jwt=$SECURE_OIDC_TOKEN | grep -o '\"client_token\": \"[^\"]*' | grep -o '[^\"]*$'")
-      export TF_VAR_proxmox_api_endpoint=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/proxmox-credentials | grep -o '\"api_endpoint\": \"[^\"]*' | grep -o '[^\"]*$'")
-      export TF_VAR_proxmox_api_token_id=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/proxmox-credentials | grep -o '\"api_token_id\": \"[^\"]*' | grep -o '[^\"]*$'")
-      export TF_VAR_proxmox_api_token_secret=$(podman run --rm --network=host -e BAO_ADDR=$BAO_ADDR -e BAO_SKIP_VERIFY=$BAO_SKIP_VERIFY -e BAO_TOKEN=$BAO_TOKEN $BAO_CLIENT sh -c "bao read -format=json secret/data/infrastructure/proxmox-credentials | grep -o '\"api_token_secret\": \"[^\"]*' | grep -o '[^\"]*$'")
+      # 1. Authenticate via OIDC and extract ephemeral token
+      export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" "$BAO_CLIENT" bao write -field=token auth/jwt/login role="$BAO_ROLE" jwt="$SECURE_OIDC_TOKEN")
       
-      # Bind dynamic infrastructure variables
-      export TF_VAR_proxmox_node_name="$PVE_NODE"
+      # 2. Extract Red Hat registry service account credentials
+      export RH_USER=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=service_account_username "$BAO_SECRET_RHEL")
+      export RH_TOKEN=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=service_account_token "$BAO_SECRET_RHEL")
+      unset BAO_TOKEN
+
+      # 3. Login to registries using volatile authfile in /dev/shm
+      podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+      podman login -u "$RH_USER" -p "$RH_TOKEN" registry.redhat.io --authfile "$TMP_AUTH_FILE"
+      unset RH_USER RH_TOKEN
+
+      # 4. Build and push immutable OCI image with both Short-SHA and latest tags
+      echo "Building immutable OS image ($IMAGE_TAG and latest for OTA upgrades)..."
+      podman build --network=host --authfile "$TMP_AUTH_FILE" \
+        -t "$IMAGE_NAME:$IMAGE_TAG" \
+        -t "$IMAGE_NAME:latest" \
+        -f "$CONTAINERFILE_PATH" .
+
+      podman push "$IMAGE_NAME:$IMAGE_TAG"
+      podman push "$IMAGE_NAME:latest"
+      echo "OCI OS images pushed successfully."
+  after_script:
+    - rm -f "$TMP_AUTH_FILE"
+    - podman rmi "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:latest" || true
+    - podman image prune -f || true
+    - podman logout "$CI_REGISTRY" || true
+
+# =========================================================================
+# STAGE 2: CONVERT OCI IMAGE TO QCOW2 DISK (RED HAT OFFICIAL METHOD)
+# =========================================================================
+build_disk_image:
+  stage: package-disk
+  tags:
+    - image-builder
+  needs:
+    - job: build_bootc_image
+      artifacts: false
+  script:
+    - |
+      set -euo pipefail
+      echo "Preparing clean workspace for QCOW2 disk generation..."
+      sudo rm -rf "$SHARED_DISK_DIR"
+      mkdir -p "$CI_PROJECT_DIR/output" "$SHARED_DISK_DIR"
+
+      # 1. Pull verified OCI image into rootful Podman storage
+      sudo podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+      sudo podman pull "$IMAGE_NAME:$IMAGE_TAG"
+
+      # 2. Translate container image into bootable QCOW2 virtual disk
+      echo "Translating container image into bootable QCOW2 disk..."
+      sudo podman run --rm --privileged \
+        -v /var/lib/containers/storage:/var/lib/containers/storage \
+        -v "$CI_PROJECT_DIR/output:/output" \
+        "$BUILDER_IMAGE" \
+        --type qcow2 \
+        "$IMAGE_NAME:$IMAGE_TAG"
+
+      # 3. Stage disk in shared partition and restore ownership to gitlab-runner
+      sudo mv "$CI_PROJECT_DIR/output/qcow2/disk.qcow2" "$SHARED_DISK_DIR/disk.qcow2"
+      sudo chown -R gitlab-runner:gitlab-runner "$SHARED_DISK_DIR"
+      ls -lh "$SHARED_DISK_DIR/disk.qcow2"
+      echo "QCOW2 disk compiled and staged successfully."
+  after_script:
+    - sudo rm -rf "$CI_PROJECT_DIR/output"
+    - sudo podman rmi "$IMAGE_NAME:$IMAGE_TAG" || true
+    - sudo podman image prune -f || true
+    - sudo podman logout "$CI_REGISTRY" || true
+
+
+# =========================================================================
+# STAGE 3: DATA-DRIVEN PROXMOX PROVISIONING VIA OPENTOFU & SSH-AGENT
+# =========================================================================
+deploy_proxmox_vm:
+  stage: deploy-infra
+  tags:
+    - image-builder
+  needs:
+    - job: build_disk_image
+      artifacts: false
+  id_tokens:
+    SECURE_OIDC_TOKEN:
+      aud: "https://gitlab.com"
+  variables:
+    TF_STATE_NAME: "${APPLIANCE_NAME}-prod"
+    TF_ADDRESS: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${TF_STATE_NAME}"
+  script:
+    - |
+      set -euo pipefail
+      echo "Authenticating with OpenBao SSOT in volatile RAM..."
+      
+      # 1. Login to OpenBao via OIDC and get ephemeral token
+      export BAO_TOKEN=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" "$BAO_CLIENT" bao write -field=token auth/jwt/login role="$BAO_ROLE" jwt="$SECURE_OIDC_TOKEN")
+      
+      # 2. Extract Proxmox API credentials into memory
+      export TF_VAR_proxmox_api_token_id=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=api_token_id "$BAO_SECRET_PVE")
+      export TF_VAR_proxmox_api_token_secret=$(podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=api_token_secret "$BAO_SECRET_PVE")
+      
+      # 3. Load SSH private key directly into memory agent (Zero disk write)
+      eval $(ssh-agent -s)
+      podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=ssh_private_key "$BAO_SECRET_PVE" | ssh-add -
+      unset BAO_TOKEN
+
+      # 4. Bind non-sensitive topology variables from GitLab CI settings
+      export TF_VAR_proxmox_api_endpoint="$PVE_API_ENDPOINT"
+      export TF_VAR_proxmox_node_name="$PVE_NODE_NAME"
       export TF_VAR_appliance_name="$APPLIANCE_NAME"
-      export TF_VAR_disk_image_name="$DISK_IMAGE_NAME"
-      export TF_VAR_vm_id="$VM_ID"
-      
-      echo "🔍 Verifying Terraform workspace files..."
-      ls -lh "$CI_PROJECT_DIR/terraform/"
-      
-      echo "🏗️ Initializing and executing OpenTofu deployment..."
+      export TF_VAR_image_tag="$IMAGE_TAG"
+      export TF_VAR_local_disk_path="/disk.qcow2"
+
+      # 5. Initialize OpenTofu with GitLab Managed HTTP State
+      echo "Initializing OpenTofu with GitLab Managed State..."
       podman run --rm --network=host \
         -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
         -w /workspace \
+        "$TOFU_IMAGE" init \
+          -backend-config="address=${TF_ADDRESS}" \
+          -backend-config="lock_address=${TF_ADDRESS}/lock" \
+          -backend-config="unlock_address=${TF_ADDRESS}/lock" \
+          -backend-config="username=gitlab-ci-token" \
+          -backend-config="password=${CI_JOB_TOKEN}" \
+          -backend-config="lock_method=POST" \
+          -backend-config="unlock_method=DELETE" \
+          -backend-config="retry_wait_min=5"
+
+      # 6. Apply declarative matrix (terraform.tfvars) with forwarded SSH Agent socket
+      echo "Applying infrastructure state on Proxmox ($PVE_NODE_NAME)..."
+      podman run --rm --network=host \
+        -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
+        -v "${SHARED_DISK_DIR}/disk.qcow2:/disk.qcow2:ro,Z" \
+        -v "${SSH_AUTH_SOCK}:/ssh-agent.sock" \
+        -e SSH_AUTH_SOCK="/ssh-agent.sock" \
         -e TF_VAR_proxmox_api_endpoint \
         -e TF_VAR_proxmox_api_token_id \
         -e TF_VAR_proxmox_api_token_secret \
         -e TF_VAR_proxmox_node_name \
         -e TF_VAR_appliance_name \
-        -e TF_VAR_disk_image_name \
-        -e TF_VAR_vm_id \
-        "$TOFU_IMAGE" init
-        
-      podman run --rm --network=host \
-        -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
+        -e TF_VAR_image_tag \
+        -e TF_VAR_local_disk_path \
         -w /workspace \
-        -e TF_VAR_proxmox_api_endpoint \
-        -e TF_VAR_proxmox_api_token_id \
-        -e TF_VAR_proxmox_api_token_secret \
-        -e TF_VAR_proxmox_node_name \
-        -e TF_VAR_appliance_name \
-        -e TF_VAR_disk_image_name \
-        -e TF_VAR_vm_id \
         "$TOFU_IMAGE" apply -auto-approve
-        
-      echo "🟢 OPENTOFU PROVISIONING SUCCEEDED: VM srv-${APPLIANCE_NAME}-prod (ID ${VM_ID}) is up and running!"
+
+      # 7. Purge staged .img archive from Proxmox ISO storage once imported into LVM
+      ssh -o StrictHostKeyChecking=no "root@${PVE_SSH_HOST}" "rm -f /var/lib/vz/template/iso/${APPLIANCE_NAME}-${IMAGE_TAG}.img" || true
+      echo "Deployment complete: All appliances defined in terraform.tfvars are running."
+  after_script:
+    - ssh-agent -k || true
+    - sudo rm -rf "$SHARED_DISK_DIR" "$CI_PROJECT_DIR/terraform/.terraform"
+
