@@ -156,10 +156,13 @@ deploy_proxmox_vm:
 
       # 5. Initialize OpenTofu with GitLab Managed HTTP State
       echo "Initializing OpenTofu with GitLab Managed State..."
+      rm -f "$CI_PROJECT_DIR/terraform/terraform.tfstate"*
+      
       podman run --rm --network=host \
         -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
         -w /workspace \
         "$TOFU_IMAGE" init \
+          -reconfigure \
           -backend-config="address=${TF_ADDRESS}" \
           -backend-config="lock_address=${TF_ADDRESS}/lock" \
           -backend-config="unlock_address=${TF_ADDRESS}/lock" \
