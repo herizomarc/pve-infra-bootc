@@ -149,7 +149,7 @@ deploy_proxmox_vm:
 
       # 3. Load SSH private key directly into memory agent (Zero disk write)
       eval $(ssh-agent -s)
-      podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=ssh_private_key "$BAO_SECRET_PVE" | ssh-add -
+      (podman run --rm --network=host -e BAO_ADDR="$BAO_ADDR" -e BAO_SKIP_VERIFY="$BAO_SKIP_VERIFY" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_CLIENT" bao kv get -field=ssh_private_key "$BAO_SECRET_PVE"; echo "") | ssh-add -
       unset BAO_TOKEN
 
       # 4. Bind non-sensitive topology variables from GitLab CI settings
