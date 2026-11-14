@@ -66,12 +66,6 @@ variable "network_bridge" {
   description = "Proxmox virtual network bridge"
 }
 
-variable "secops_password" {
-  type        = string
-  sensitive   = true
-  description = "Initial password for the secops user injected via Cloud-Init"
-}
-
 variable "secops_ssh_public_key" {
   type        = string
   description = "Authorized SSH public key for the secops user"
