@@ -25,11 +25,12 @@ resource "proxmox_virtual_environment_file" "cloud_init_config" {
 
   source_raw {
     file_name = "${each.key}-user-data.yml"
-    data = templatefile("/templates/zabbix.yml.tmpl", {
+    data = templatefile("${path.module}/../templates/zabbix.yml.tmpl", {
       ssh_key = trimspace(var.secops_ssh_public_key)
     })
   }
 }
+
 
 # 3. Instantiate and boot all virtual machines defined in terraform.tfvars
 resource "proxmox_virtual_environment_vm" "appliances" {

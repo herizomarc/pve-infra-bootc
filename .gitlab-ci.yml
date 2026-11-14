@@ -162,10 +162,10 @@ deploy_proxmox_vm:
       # 5. Initialize OpenTofu with GitLab Managed HTTP State
       echo "Initializing OpenTofu with GitLab Managed State..."
       rm -f "$CI_PROJECT_DIR/terraform/terraform.tfstate"*
-      
+
       podman run --rm --network=host \
-        -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
-        -w /workspace \
+        -v "$CI_PROJECT_DIR:/project:Z" \
+        -w /project/terraform \
         "$TOFU_IMAGE" init \
           -reconfigure \
           -backend-config="address=${TF_ADDRESS}" \
@@ -181,8 +181,7 @@ deploy_proxmox_vm:
       echo "Applying infrastructure state on Proxmox ($PVE_NODE_NAME)..."
       podman run --rm --network=host \
         --security-opt label=disable \
-        -v "$CI_PROJECT_DIR/terraform:/workspace:Z" \
-        -v "$CI_PROJECT_DIR/templates:/templates:ro,Z" \
+        -v "$CI_PROJECT_DIR:/project:Z" \
         -v "${SHARED_DISK_DIR}/disk.qcow2:/disk.qcow2:ro,Z" \
         -v "${SSH_AUTH_SOCK}:/ssh-agent.sock" \
         -e SSH_AUTH_SOCK="/ssh-agent.sock" \
@@ -194,7 +193,7 @@ deploy_proxmox_vm:
         -e TF_VAR_appliance_name \
         -e TF_VAR_image_tag \
         -e TF_VAR_local_disk_path \
-        -w /workspace \
+        -w /project/terraform \
         "$TOFU_IMAGE" apply -auto-approve
 
 
