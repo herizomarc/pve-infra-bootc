@@ -32,6 +32,7 @@ resource "proxmox_virtual_environment_file" "cloud_init_config" {
   }
 }
 
+
 # 3. Instantiate and boot all virtual machines defined in terraform.tfvars
 resource "proxmox_virtual_environment_vm" "appliances" {
   for_each = var.virtual_machines

@@ -1,6 +1,6 @@
 #cloud-config
 hostname: ${hostname}
-fqdn: ${hostname}.local
+prefer_fqdn_over_hostname: false
 manage_etc_hosts: true
 autostart: true
 
@@ -27,46 +27,26 @@ users:
       - "${ssh_key}"
 
 runcmd:
+  - hostnamectl set-hostname ${hostname}
   - localectl set-keymap fr
   - chown -R postgres:postgres /var/lib/pgsql
   - restorecon -Rv /var/lib/pgsql
   - postgresql-setup --initdb --unit postgresql
   
-  # Enable password authentication (scram-sha-256) for local TCP connections
-  - sed -i 's/127.0.0.1\/32            ident/127.0.0.1\/32            scram-sha-256/' /var/lib/pgsql/data/pg_hba.conf
-  - sed -i 's/::1\/128                 ident/::1\/128                 scram-sha-256/' /var/lib/pgsql/data/pg_hba.conf
+  # Allow local password authentication (md5) for Zabbix setup.php
+  - sed -i '1i host    all             all             127.0.0.1/32            md5\nhost    all             all             ::1/128                 md5' /var/lib/pgsql/data/pg_hba.conf
   - systemctl enable --now postgresql
   
-  # SECOPS ENFORCED: Generate random DB password in RAM and configure Server + Web UI automatically
-  - |
-    DB_DYNAMIC_PASS=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
-    sudo -u postgres psql -c "CREATE USER zabbix WITH PASSWORD '$${DB_DYNAMIC_PASS}';"
-    sudo -u postgres psql -c "CREATE DATABASE zabbix OWNER zabbix;"
-    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | sudo -u zabbix psql zabbix
-    sed -i "s/# DBPassword=/DBPassword=$${DB_DYNAMIC_PASS}/" /etc/zabbix/zabbix_server.conf
-
-    # Pre-configure Zabbix Frontend to bypass manual web setup wizard
-    cat <<EOF > /etc/zabbix/web/zabbix.conf.php
-    <?php
-    \$DB['TYPE']     = 'POSTGRESQL';
-    \$DB['SERVER']   = '127.0.0.1';
-    \$DB['PORT']     = '5432';
-    \$DB['DATABASE'] = 'zabbix';
-    \$DB['USER']     = 'zabbix';
-    \$DB['PASSWORD'] = '$${DB_DYNAMIC_PASS}';
-    \$DB['SCHEMA']   = '';
-    \$ZBX_SERVER      = '127.0.0.1';
-    \$ZBX_SERVER_PORT = '10051';
-    \$ZBX_SERVER_NAME = '${hostname}';
-    \$IMAGE_FORMAT_DEFAULT = IMAGE_FORMAT_PNG;
-    EOF
-    chown apache:apache /etc/zabbix/web/zabbix.conf.php
-    chmod 640 /etc/zabbix/web/zabbix.conf.php
-    unset DB_DYNAMIC_PASS
+  # Create Zabbix DB & User with standard initial password (for setup.php)
+  - sudo -u postgres psql -c "CREATE USER zabbix WITH PASSWORD 'zabbix';"
+  - sudo -u postgres psql -c "CREATE DATABASE zabbix OWNER zabbix;"
+  - zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | sudo -u zabbix psql zabbix
+  - sed -i "s/# DBPassword=/DBPassword=zabbix/" /etc/zabbix/zabbix_server.conf
   
   - sed -i 's/# listen 80;/listen 80;/' /etc/nginx/conf.d/zabbix.conf
   - sed -i 's/# server_name example.com;/server_name _;/' /etc/nginx/conf.d/zabbix.conf
   - firewall-cmd --permanent --add-service={http,https}
   - firewall-cmd --permanent --add-port=10051/tcp
   - firewall-cmd --reload
-  - systemctl enable --now zabbix-server nginx php-fpm
+  - systemctl enable postgresql zabbix-server nginx php-fpm
+  - systemctl restart postgresql zabbix-server nginx php-fpm

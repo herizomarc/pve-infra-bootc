@@ -34,10 +34,14 @@ RUN dnf install -y \
     && dnf clean all
 
 
-# PHASE 4:SELINUX HARDENING FOR ZABBIX & NGINX ON RHEL 9
+# PHASE 4:SELINUX HARDENING & CUSTOM MODULE FOR ZABBIX KRB5 KEYTAB LOOKUPS
 RUN setsebool -P zabbix_can_network on && \
     setsebool -P httpd_can_connect_zabbix on && \
-    setsebool -P httpd_can_network_connect_db on && \
+    printf 'module zabbix_krb5 1.1;\nrequire {\n  type zabbix_t;\n  type krb5_keytab_t;\n  class dir { search read open getattr };\n  class file { read open getattr };\n}\nallow zabbix_t krb5_keytab_t:dir { search read open getattr };\nallow zabbix_t krb5_keytab_t:file { read open getattr };\n' > /tmp/zabbix_krb5.te && \
+    checkmodule -M -m -o /tmp/zabbix_krb5.mod /tmp/zabbix_krb5.te && \
+    semodule_package -o /tmp/zabbix_krb5.pp -m /tmp/zabbix_krb5.mod && \
+    semodule -i /tmp/zabbix_krb5.pp && \
+    rm -f /tmp/zabbix_krb5.* && \
     dnf clean all
 
 
