@@ -94,7 +94,7 @@ resource "proxmox_virtual_environment_vm" "appliances" {
   lifecycle {
     ignore_changes = [
       description,
-      disk.file_id,
+      disk[0].file_id,
     ]
   }
 }
