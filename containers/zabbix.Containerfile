@@ -22,15 +22,18 @@ RUN dnf install -y \
 RUN dnf install -y https://repo.zabbix.com/zabbix/7.0/rhel/9/x86_64/zabbix-release-latest-7.0.el9.noarch.rpm && \
     dnf clean all
 
-# PHASE 3: APPLICATION PACKAGING (ZABBIX ENGINE, POSTGRESQL & WEB LAYER)
+# PHASE 3: APPLICATION PACKAGING (ZABBIX ENGINE, POSTGRESQL, WEB & LOCALES)
 RUN dnf install -y \
     zabbix-server-pgsql \
     zabbix-web-pgsql \
     zabbix-nginx-conf \
     zabbix-sql-scripts \
     zabbix-selinux-policy \
+    zabbix-agent2 \
     postgresql-server \
     firewalld \
+    glibc-langpack-en \
+    glibc-langpack-fr \
     && dnf clean all
 
 
@@ -49,6 +52,7 @@ RUN setsebool -P zabbix_can_network on && \
 RUN systemctl enable firewalld && \
     systemctl enable postgresql && \
     systemctl enable zabbix-server && \
+    systemctl enable zabbix-agent2 && \
     systemctl enable nginx && \
     systemctl enable php-fpm
 

@@ -91,5 +91,11 @@ resource "proxmox_virtual_environment_vm" "appliances" {
     datastore_id = var.datastore_vm
     type         = "4m"
   }
+  lifecycle {
+    ignore_changes = [
+      description,
+      disk.file_id,
+    ]
+  }
 }
 

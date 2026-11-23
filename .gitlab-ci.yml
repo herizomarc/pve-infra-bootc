@@ -85,6 +85,13 @@ build_disk_image:
   needs:
     - job: build_bootc_image
       artifacts: false
+  # Execute only stage 2 if terraform/ or templates/ change (Day-0)
+  rules:
+    - changes:
+        - terraform/**/*
+        - templates/**/*
+    - when: manual
+      allow_failure: true
   script:
     - |
       set -euo pipefail
@@ -133,6 +140,13 @@ deploy_proxmox_vm:
   variables:
     TF_STATE_NAME: "${APPLIANCE_NAME}-prod"
     TF_ADDRESS: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${TF_STATE_NAME}"
+  # Execute only stage 3 if terraform/ or templates/ change (Day-0)
+  rules:
+    - changes:
+        - terraform/**/*
+        - templates/**/*
+    - when: manual
+      allow_failure: true
   script:
     - |
       set -euo pipefail
